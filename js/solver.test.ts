@@ -124,3 +124,34 @@ test('sanitizeStage automatically fixes overlapping or out-of-bounds buses', () 
   assert.equal(fixed.buses.length, 2);
   assert.equal(doBusesOverlap(fixed.buses[0], fixed.buses[1]), false);
 });
+
+test('Zone C dynamic grid origin guarantees strict separation from Zone B parking bays across all levels 1..35', () => {
+  const LOT_TOP_EDGE_Z = 0.45;
+  const ROAD_BOTTOM_EDGE_Z = -3.75 + 3.35 / 2; // -2.075
+  const manager = new LevelManager();
+
+  for (let lvl = 1; lvl <= 35; lvl++) {
+    const stage = manager.getStage(lvl);
+    const gridW = stage.grid.width;
+    const gridH = stage.grid.height;
+    const dynamicOriginZ = LOT_TOP_EDGE_Z + (gridH * CELL_SIZE) / 2;
+
+    for (const bus of stage.buses) {
+      const pos = getBusWorldCenter(bus, gridW, gridH, dynamicOriginZ);
+      const { meshLength } = getBusMeshDimensions(bus.length || 2);
+      const isVertical = bus.dir === 'N' || bus.dir === 'S';
+      const halfZSpan = isVertical ? meshLength / 2 : (CELL_SIZE * 0.78) / 2;
+      const busTopEdgeZ = pos.worldZ - halfZSpan;
+
+      assert.ok(
+        busTopEdgeZ >= LOT_TOP_EDGE_Z,
+        `Level ${lvl} bus ${bus.id} top edge (${busTopEdgeZ}) must stay below LOT_TOP_EDGE_Z (${LOT_TOP_EDGE_Z})`
+      );
+      assert.ok(
+        busTopEdgeZ - ROAD_BOTTOM_EDGE_Z >= 2.5,
+        `Level ${lvl} bus ${bus.id} must maintain >= 2.5 world units separation from Zone B parking bays`
+      );
+    }
+  }
+});
+

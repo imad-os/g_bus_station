@@ -92,10 +92,20 @@ export const TIME_OF_DAY_PRESETS = {
 };
 
 export const BAY_ANGLE = 0.42; // ~24 degrees (\ \ \ \ tilt)
-export const GRID_ORIGIN_Z = 3.65;
+export const LOT_TOP_EDGE_Z = 0.45; // Fixed top edge of Zone C so buses NEVER overlap Zone B parking bays
+export const GRID_ORIGIN_Z = 5.25;
 export const ROAD_CENTER_Z = -3.75;
 export const LOOP_CENTER_Z = -8.45;
 export const GATE_POS = new THREE.Vector3(0, 0.15, -5.55);
+
+/**
+ * Computes Zone C's center Z from its fixed top edge (LOT_TOP_EDGE_Z = 0.45),
+ * guaranteeing a clean 2.5+ world-unit separation corridor below Zone B's parking bays
+ * no matter how many rows of buses generate.
+ */
+export function getDynamicGridOriginZ(gridHeight = 6) {
+  return LOT_TOP_EDGE_Z + (gridHeight * CELL_SIZE) / 2;
+}
 
 // Pre-allocated scratch vectors for zero GC in 60Hz loop
 const _projVec = new THREE.Vector3();
@@ -130,11 +140,16 @@ export class Renderer3D {
     this.currentTimePreset = 'night';
     this.headlightOpacity = TIME_OF_DAY_PRESETS.night.headlightOpacity;
 
+    // Dynamic grid dimensions for Smart Camera Auto-Zoom & Zone B/C separation
+    this.currentGridW = 6;
+    this.currentGridH = 6;
+    this.currentGridOriginZ = getDynamicGridOriginZ(6);
+
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(TIME_OF_DAY_PRESETS.night.bgHex);
-    this.scene.fog = new THREE.Fog(TIME_OF_DAY_PRESETS.night.fogHex, 90, 150);
+    this.scene.fog = new THREE.Fog(TIME_OF_DAY_PRESETS.night.fogHex, 95, 165);
 
-    this.camera = new THREE.PerspectiveCamera(38, 1, 0.5, 140);
+    this.camera = new THREE.PerspectiveCamera(38, 1, 0.5, 160);
     this.cameraLookTarget = new THREE.Vector3(0, 0, 0.8);
 
     this.renderer = new THREE.WebGLRenderer({
@@ -180,8 +195,9 @@ export class Renderer3D {
     this.worldGroup.add(this.passengerPoolGroup);
     this.worldGroup.add(this.runnersGroup);
 
-    // Pre-allocated 3D Passenger Pool (for loop queue + boarding runners)
+    // Pre-allocated 3D Passenger Pool (for turning loop circle + waiting feeder line + runners)
     this.maxVisibleQueuePassengers = 240;
+    this.loopCapacityRows = 24; // 24 rows * 5 abreast = 120 passengers turning inside the oval circle
     this.queuePassengerNodes = [];
     this.runnerPool = [];
     this.activeRunners = [];
@@ -193,8 +209,11 @@ export class Renderer3D {
     this.focusedBayIndex = -1;
     this.bayFocusMesh = null;
 
-    // Walkway spline
+    // Zone A Curves: Closed Turning Loop Circle + Stationary Top-Right Feeder Waiting Line
+    this.loopCurve = null;
+    this.feederCurve = null;
     this.walkwayCurve = null;
+    this.loopTurnPhase = 0; // Continuous slow rotation phase [0..1) for the circle queue
     this.queueVisualScroll = 0;
 
     this._initSurfaceTextures();
@@ -449,28 +468,34 @@ export class Renderer3D {
     this.worldGroup.add(ground);
 
     // =========================================================================
-    // ZONE A: Top 3D Looping Passenger Queue Walkway
+    // ZONE A: Top 3D Looping Passenger Queue Walkway (Turning Circle + Waiting Feeder Line)
     // =========================================================================
-    const curvePoints = [
-      new THREE.Vector3(-0.6, 0.14, -5.75),  // Front left of gate (boards first!)
-      new THREE.Vector3(-2.4, 0.14, -6.05),
-      new THREE.Vector3(-4.0, 0.14, -7.05),
-      new THREE.Vector3(-4.5, 0.14, -8.55),
-      new THREE.Vector3(-3.8, 0.14, -10.05),
-      new THREE.Vector3(-1.8, 0.14, -10.95),
-      new THREE.Vector3(0.8, 0.14, -10.95),
-      new THREE.Vector3(3.1, 0.14, -10.15),
-      new THREE.Vector3(4.3, 0.14, -8.65),
-      new THREE.Vector3(3.9, 0.14, -7.05),
-      new THREE.Vector3(2.2, 0.14, -6.05),
-      new THREE.Vector3(1.1, 0.14, -5.85),   // Right side of gate loop
-      new THREE.Vector3(3.5, 0.14, -6.65),
-      new THREE.Vector3(4.7, 0.14, -8.65),
-      new THREE.Vector3(5.3, 0.14, -11.05),  // Feeder path curving up to top-right
-      new THREE.Vector3(6.2, 0.14, -14.0),
-      new THREE.Vector3(6.8, 0.14, -16.8),
+    // 1. Closed 360-degree elliptical loop track where passengers continuously revolve in a circle.
+    //    Starts at u = 0 at the bottom-center Boarding Gate (x = 0, z = LOOP_CENTER_Z + 2.02)
+    //    and circles clockwise around the central island.
+    const loopPts = [];
+    const loopSegments = 16;
+    const rx = 4.05;
+    const rz = 2.02;
+    for (let s = 0; s < loopSegments; s++) {
+      // Angle 0 at bottom center (x = 0, z = +rz), advancing clockwise around the oval
+      const theta = (s / loopSegments) * Math.PI * 2;
+      const lx = -Math.sin(theta) * rx;
+      const lz = LOOP_CENTER_Z + Math.cos(theta) * rz;
+      loopPts.push(new THREE.Vector3(lx, 0.14, lz));
+    }
+    this.loopCurve = new THREE.CatmullRomCurve3(loopPts, true, 'centripetal', 0.5);
+
+    // 2. Stationary Top-Right Feeder Line where overflow passengers wait in line before entering the circle
+    const feederPts = [
+      new THREE.Vector3(3.85, 0.14, -9.55),
+      new THREE.Vector3(4.85, 0.14, -10.95),
+      new THREE.Vector3(5.65, 0.14, -12.75),
+      new THREE.Vector3(6.25, 0.14, -14.75),
+      new THREE.Vector3(6.75, 0.14, -16.85),
     ];
-    this.walkwayCurve = new THREE.CatmullRomCurve3(curvePoints, false, 'centripetal', 0.5);
+    this.feederCurve = new THREE.CatmullRomCurve3(feederPts, false, 'centripetal', 0.5);
+    this.walkwayCurve = this.loopCurve;
 
     this._buildWalkwayLoopGeometry();
 
@@ -488,7 +513,7 @@ export class Renderer3D {
     // =========================================================================
     // ZONE B: Middle Weathered Dark Asphalt Boarding Road & 8 Angled Parking Bays
     // =========================================================================
-    const roadWidth = 26;
+    const roadWidth = 28;
     const roadDepth = 3.35;
     const roadGeo = new THREE.PlaneGeometry(roadWidth, roadDepth);
     this.roadMat = new THREE.MeshLambertMaterial({
@@ -504,17 +529,31 @@ export class Renderer3D {
     const curbGeo = new THREE.BoxGeometry(roadWidth, 0.09, 0.16);
     const roadCurbMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
 
-    const leftTopCurb = new THREE.Mesh(new THREE.BoxGeometry(11.2, 0.09, 0.16), roadCurbMat);
-    leftTopCurb.position.set(-7.2, 0.045, ROAD_CENTER_Z - roadDepth / 2);
+    const leftTopCurb = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.09, 0.16), roadCurbMat);
+    leftTopCurb.position.set(-7.4, 0.045, ROAD_CENTER_Z - roadDepth / 2);
     this.zoneBGroup.add(leftTopCurb);
 
-    const rightTopCurb = new THREE.Mesh(new THREE.BoxGeometry(11.2, 0.09, 0.16), roadCurbMat);
-    rightTopCurb.position.set(7.2, 0.045, ROAD_CENTER_Z - roadDepth / 2);
+    const rightTopCurb = new THREE.Mesh(new THREE.BoxGeometry(11.6, 0.09, 0.16), roadCurbMat);
+    rightTopCurb.position.set(7.4, 0.045, ROAD_CENTER_Z - roadDepth / 2);
     this.zoneBGroup.add(rightTopCurb);
 
     const bottomCurb = new THREE.Mesh(curbGeo, roadCurbMat);
     bottomCurb.position.set(0, 0.045, ROAD_CENTER_Z + roadDepth / 2);
     this.zoneBGroup.add(bottomCurb);
+
+    // Clean Dark Asphalt Exit/Approach Buffer Corridor between Zone B Parking Bays (z = -2.075)
+    // and Zone C Bus Puzzle Lot Top Edge (z = +0.45), creating a clear visual separation space
+    const bufferDepth = LOT_TOP_EDGE_Z - (ROAD_CENTER_Z + roadDepth / 2) - 0.25;
+    const bufferCenterZ = (ROAD_CENTER_Z + roadDepth / 2 + LOT_TOP_EDGE_Z) * 0.5;
+    const bufferGeo = new THREE.PlaneGeometry(roadWidth, Math.max(1.2, bufferDepth));
+    const bufferMat = new THREE.MeshLambertMaterial({
+      color: 0x1e293b,
+      map: this.surfaceTextures.get('walkway'),
+    });
+    const bufferMesh = new THREE.Mesh(bufferGeo, bufferMat);
+    bufferMesh.rotation.x = -Math.PI / 2;
+    bufferMesh.position.set(0, 0.004, bufferCenterZ);
+    this.zoneBGroup.add(bufferMesh);
 
     this._buildParkingBays();
   }
@@ -702,7 +741,7 @@ export class Renderer3D {
    * Builds the 8 Angled Parking Bays in Zone B:
    * - Slot 0: Gold VIP bay
    * - Slots 1..4: Unlocked neon-cyan/white bays
-   * - Slots 5..7: Locked slate bays with glowing green '+' icon (unlockable via TV remote or click)
+   * - Slots 5..7: Extra bays requiring 10 levels each (Lv.10, Lv.20, Lv.30)
    */
   _buildParkingBays() {
     this.bayMeshes = [];
@@ -717,13 +756,14 @@ export class Renderer3D {
       const z = ROAD_CENTER_Z + 0.05;
       const isVip = i === 0;
       const isDefaultUnlocked = i >= 1 && i <= 4;
-      const mode = isVip ? 'vip' : isDefaultUnlocked ? 'active' : 'locked';
+      const reqLvl = i >= 5 ? (i - 4) * 10 : 1;
+      const mode = isVip ? 'vip' : isDefaultUnlocked ? 'active' : `milestone_${reqLvl}`;
 
       const bayGroup = new THREE.Group();
       bayGroup.position.set(x, 0.025, z);
       bayGroup.rotation.y = BAY_ANGLE;
 
-      const tex = this._createBayTexture(mode);
+      const tex = this._createBayTexture(mode, reqLvl);
       const planeMat = new THREE.MeshBasicMaterial({
         map: tex,
         transparent: true,
@@ -754,7 +794,7 @@ export class Renderer3D {
     }
   }
 
-  _createBayTexture(mode) {
+  _createBayTexture(mode, reqLevel = 10) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 512;
@@ -762,13 +802,17 @@ export class Renderer3D {
 
     ctx.clearRect(0, 0, 256, 512);
 
+    const isMilestoneLocked = String(mode).startsWith('milestone_');
+
     // Subtle dark recessed stall fill
     ctx.fillStyle =
       mode === 'vip'
         ? 'rgba(251, 191, 36, 0.09)'
         : mode === 'active'
         ? 'rgba(56, 189, 248, 0.08)'
-        : 'rgba(15, 23, 42, 0.35)';
+        : mode === 'ready'
+        ? 'rgba(34, 197, 94, 0.12)'
+        : 'rgba(15, 23, 42, 0.42)';
     ctx.fillRect(26, 28, 204, 456);
 
     const strokeColor =
@@ -776,7 +820,9 @@ export class Renderer3D {
         ? '#fbbf24'
         : mode === 'active'
         ? '#7dd3fc'
-        : 'rgba(148, 163, 184, 0.55)';
+        : mode === 'ready'
+        ? '#4ade80'
+        : 'rgba(100, 116, 139, 0.48)';
 
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = mode === 'vip' ? 14 : 11;
@@ -820,21 +866,57 @@ export class Renderer3D {
       ctx.textBaseline = 'middle';
       ctx.fillText('VIP', 0, 0);
       ctx.restore();
-    } else if (mode === 'locked') {
-      // Glowing green '+' icon in center of locked bay
-      ctx.fillStyle = 'rgba(34, 197, 94, 0.22)';
+    } else if (mode === 'ready') {
+      // Glowing green '+' icon when 10-level milestone is reached and bay can be opened
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
       ctx.beginPath();
-      ctx.arc(128, 256, 48, 0, Math.PI * 2);
+      ctx.arc(128, 232, 46, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.strokeStyle = '#4ade80';
-      ctx.lineWidth = 16;
+      ctx.lineWidth = 15;
       ctx.beginPath();
-      ctx.moveTo(128 - 28, 256);
-      ctx.lineTo(128 + 28, 256);
-      ctx.moveTo(128, 256 - 28);
-      ctx.lineTo(128, 256 + 28);
+      ctx.moveTo(128 - 26, 232);
+      ctx.lineTo(128 + 26, 232);
+      ctx.moveTo(128, 232 - 26);
+      ctx.lineTo(128, 232 + 26);
       ctx.stroke();
+
+      ctx.fillStyle = '#86efac';
+      ctx.font = '900 30px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('OPEN', 128, 316);
+    } else if (isMilestoneLocked) {
+      // Gold padlock + Lv.10 / Lv.20 / Lv.30 milestone badge
+      ctx.strokeStyle = '#d97706';
+      ctx.lineWidth = 10;
+      ctx.beginPath();
+      ctx.arc(128, 195, 22, Math.PI, 0, false);
+      ctx.stroke();
+
+      ctx.fillStyle = '#f59e0b';
+      ctx.strokeStyle = '#b45309';
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.roundRect(96, 195, 64, 50, 12);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#451a03';
+      ctx.beginPath();
+      ctx.arc(128, 220, 7, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#fef08a';
+      ctx.font = '900 34px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`Lv.${reqLevel}`, 128, 290);
+
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = '800 24px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText('+1 BAY', 128, 332);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -844,22 +926,25 @@ export class Renderer3D {
   }
 
   /**
-   * Updates bay slot visual state when unlocked during gameplay.
+   * Updates bay slot visual state when unlocked or when 10-level milestones are reached.
    */
   updateBaySlotsVisuals(dockSlots) {
     for (let i = 0; i < this.bayMeshes.length; i++) {
       const bay = this.bayMeshes[i];
       const slotInfo = dockSlots[i];
       if (!slotInfo) continue;
+      const reqLvl = slotInfo.requiredLevel || (i >= 5 ? (i - 4) * 10 : 1);
       const desiredMode = slotInfo.isVip
         ? 'vip'
         : slotInfo.unlocked
         ? 'active'
-        : 'locked';
+        : slotInfo.canOpen
+        ? 'ready'
+        : `milestone_${reqLvl}`;
       if (bay.mode !== desiredMode) {
         bay.mode = desiredMode;
         if (bay.planeMat.map) bay.planeMat.map.dispose();
-        bay.planeMat.map = this._createBayTexture(desiredMode);
+        bay.planeMat.map = this._createBayTexture(desiredMode, reqLvl);
         bay.planeMat.needsUpdate = true;
       }
     }
@@ -1021,6 +1106,9 @@ export class Renderer3D {
 
     const gridW = stage.grid.width;
     const gridH = stage.grid.height;
+    this.currentGridW = gridW;
+    this.currentGridH = gridH;
+    this.currentGridOriginZ = getDynamicGridOriginZ(gridH);
 
     // Textured dark basalt stone paver pad beneath the grid with recessed cell borders
     if (this.lotPadMesh) {
@@ -1034,11 +1122,11 @@ export class Renderer3D {
     const padW = gridW * CELL_SIZE;
     const padH = gridH * CELL_SIZE;
 
-    // Outer dark steel curb framing the puzzle grid
+    // Outer dark steel curb framing the puzzle grid (top edge fixed at LOT_TOP_EDGE_Z = 0.45)
     const rimGeo = new THREE.BoxGeometry(padW + 0.55, 0.06, padH + 0.55);
     const rimMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
     this.lotRimMesh = new THREE.Mesh(rimGeo, rimMat);
-    this.lotRimMesh.position.set(0, -0.02, GRID_ORIGIN_Z);
+    this.lotRimMesh.position.set(0, -0.02, this.currentGridOriginZ);
     this.zoneCGroup.add(this.lotRimMesh);
 
     const padGeo = new THREE.PlaneGeometry(padW, padH);
@@ -1050,12 +1138,12 @@ export class Renderer3D {
     });
     this.lotPadMesh = new THREE.Mesh(padGeo, this.lotPadMat);
     this.lotPadMesh.rotation.x = -Math.PI / 2;
-    this.lotPadMesh.position.set(0, 0.012, GRID_ORIGIN_Z);
+    this.lotPadMesh.position.set(0, 0.012, this.currentGridOriginZ);
     this.zoneCGroup.add(this.lotPadMesh);
 
     for (let i = 0; i < stage.buses.length; i++) {
       const busData = stage.buses[i];
-      const posInfo = getBusWorldCenter(busData, gridW, gridH, GRID_ORIGIN_Z);
+      const posInfo = getBusWorldCenter(busData, gridW, gridH, this.currentGridOriginZ);
       const busGroup = this._createCompositeBusMesh(busData);
 
       busGroup.position.set(posInfo.worldX, 0, posInfo.worldZ);
@@ -1081,6 +1169,9 @@ export class Renderer3D {
         bounceTimer: 0,
       });
     }
+
+    // Automatically re-frame camera zoom to fit the current stage's grid dimensions
+    this.resize();
   }
 
   /**
@@ -1333,7 +1424,8 @@ export class Renderer3D {
       waypoints.push({ x: bay.x + 0.35, z: roadApproachZ, rotY: Math.PI / 2 });
     } else {
       // dir === 'S'
-      const bottomLaneZ = GRID_ORIGIN_Z + halfGridH;
+      const originZ = this.currentGridOriginZ || getDynamicGridOriginZ(gridHeight);
+      const bottomLaneZ = originZ + halfGridH;
       const sideLaneX = startX <= 0 ? -halfGridW : halfGridW;
       waypoints.push({ x: startX, z: bottomLaneZ, rotY: Math.PI });
       waypoints.push({
@@ -1442,11 +1534,16 @@ export class Renderer3D {
   }
 
   /**
-   * Updates the 3D Passenger Queue positions along the CatmullRomCurve3 in tightly packed rows of 5 abreast.
+   * Updates the 3D Passenger Queue positions in tightly packed rows of 5 abreast:
+   * - Rows 0..23 (up to 120 passengers) continuously revolve around the closed oval loop (`this.loopCurve`)
+   *   at a slow, steady pace (`this.loopTurnPhase`).
+   * - Rows 24+ wait in line along the stationary top-right feeder walkway (`this.feederCurve`) and advance
+   *   into the turning circle as front passengers board buses.
    */
   syncPassengerQueueVisuals(passengerQueue, elapsedSec) {
     const queueLen = passengerQueue.length;
     const abreast = 5;
+    const loopRows = this.loopCapacityRows || 24;
 
     const visualCount =
       queueLen === 0
@@ -1470,16 +1567,27 @@ export class Renderer3D {
       const rowIdx = Math.floor(i / abreast);
       const colIdx = i % abreast;
 
-      const effectiveRow = rowIdx + this.queueVisualScroll;
-      const u = Math.min(0.985, 0.008 + effectiveRow * 0.0202);
-
-      this.walkwayCurve.getPointAt(u, _curvePt);
-      this.walkwayCurve.getTangentAt(u, _curveTan);
+      if (rowIdx < loopRows) {
+        // Inside the Oval Circle: continuously revolves at a slow pace
+        const uLoop = ((rowIdx / loopRows) + this.loopTurnPhase) % 1.0;
+        this.loopCurve.getPointAt(uLoop, _curvePt);
+        this.loopCurve.getTangentAt(uLoop, _curveTan);
+      } else {
+        // Overflow Feeder Line (top-right walkway): waits in line and steps forward as passengers board
+        const feederRow = rowIdx - loopRows + this.queueVisualScroll;
+        const uFeeder = Math.min(0.985, 0.035 + feederRow * 0.042);
+        this.feederCurve.getPointAt(uFeeder, _curvePt);
+        this.feederCurve.getTangentAt(uFeeder, _curveTan);
+      }
 
       _perpVec.set(-_curveTan.z, 0, _curveTan.x).normalize();
-      const lateralOffset = (colIdx - (abreast - 1) / 2) * 0.35;
+      const lateralOffset = (colIdx - (abreast - 1) / 2) * 0.34;
 
-      const bob = Math.sin(elapsedSec * 7.5 + i * 0.7) * 0.025;
+      const isTurning = rowIdx < loopRows;
+      const bobFreq = isTurning ? 8.2 : 4.5;
+      const bobAmp = isTurning ? 0.028 : 0.014;
+      const bob = Math.sin(elapsedSec * bobFreq + i * 0.7) * bobAmp;
+
       node.group.position.set(
         _curvePt.x + _perpVec.x * lateralOffset,
         _curvePt.y + Math.max(0, bob),
@@ -1538,6 +1646,9 @@ export class Renderer3D {
    * Fixed 60Hz delta-time update for all 3D animations (zero allocations).
    */
   update(dt, passengerQueue, elapsedSec, onBusArrivedInBay) {
+    // Advance the continuous slow rotation of the passenger queue circle
+    this.loopTurnPhase = (this.loopTurnPhase + dt * 0.055) % 1.0;
+
     if (this.queueVisualScroll > 0.001) {
       this.queueVisualScroll *= Math.exp(-10 * dt);
       if (this.queueVisualScroll < 0.002) this.queueVisualScroll = 0;
@@ -1705,6 +1816,12 @@ export class Renderer3D {
     this.renderer.render(this.scene, this.camera);
   }
 
+  /**
+   * Smart Camera Auto-Zoom:
+   * Dynamically frames Zone A (Turning Loop + Feeder Line), Zone B (8 Angled Parking Bays),
+   * the Separation Plaza, and Zone C (all generated vehicles across any gridWidth x gridHeight)
+   * so all vehicles are 100% visible without overlapping the parking bays or HUD.
+   */
   resize() {
     const w = window.innerWidth || 1280;
     const h = window.innerHeight || 720;
@@ -1712,19 +1829,39 @@ export class Renderer3D {
 
     this.camera.aspect = aspect;
 
-    let camHeight = 33.8;
-    let camZ = 21.8;
-    let lookZ = 0.15;
+    const gridW = this.currentGridW || 6;
+    const gridH = this.currentGridH || 6;
+    const lotBottomZ = LOT_TOP_EDGE_Z + gridH * CELL_SIZE;
+
+    // World bounds to keep 100% framed between top HUD and bottom booster dock
+    const worldTopZ = -13.2;
+    const worldBottomZ = lotBottomZ + 2.8;
+    const totalDepthZ = worldBottomZ - worldTopZ; // ~25.6 for 6x6, ~28.8 for 8x8, ~30.4 for 9x9
+    const baselineDepthZ = 25.0;
+    const depthZoomFactor = Math.max(1.0, totalDepthZ / baselineDepthZ);
+
+    // Ensure wide grids (7, 8, 9 cols) and all 8 parking bays fit horizontally
+    const requiredWorldWidth = Math.max(15.2, gridW * CELL_SIZE + 4.4);
+    const baselineWidth = 14.5;
+    const widthZoomFactor = Math.max(1.0, requiredWorldWidth / baselineWidth);
+
+    // Center the camera look target between Zone A/B and the dynamic bottom of Zone C
+    let lookZ = (worldTopZ + worldBottomZ) * 0.5 - 0.15;
+    let camHeight = 34.5 * Math.max(depthZoomFactor, widthZoomFactor * 0.92);
+    let camZ = lookZ + camHeight * 0.63;
 
     if (aspect < 0.85) {
-      const scale = Math.max(1.0, 0.72 / Math.max(0.42, aspect));
-      camHeight = 29.2 * scale;
-      camZ = 19.0 * scale;
-      lookZ = -0.15;
-    } else if (aspect > 1.35) {
-      camHeight = 34.4;
-      camZ = 22.2;
-      lookZ = 0.25;
+      const portraitScale = Math.max(
+        depthZoomFactor * 1.04,
+        (0.74 / Math.max(0.42, aspect)) * widthZoomFactor
+      );
+      camHeight = 30.2 * portraitScale;
+      lookZ = (worldTopZ + worldBottomZ) * 0.5 - 0.35;
+      camZ = lookZ + camHeight * 0.64;
+    } else if (aspect < 1.25) {
+      const tabletScale = Math.max(depthZoomFactor, (1.18 / aspect) * widthZoomFactor * 0.95);
+      camHeight = 34.5 * tabletScale;
+      camZ = lookZ + camHeight * 0.63;
     }
 
     this.camera.position.set(0, camHeight, camZ);

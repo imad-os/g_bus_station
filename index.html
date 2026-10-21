@@ -229,36 +229,47 @@
       </footer>
     </div>
 
-    <!-- Title Screen Modal Overlay (100% Dark Mode) -->
+    <!-- Title Screen Modal Overlay: Candy Crush-Style Winding Saga Map (100% Dark Mode) -->
     <div id="title-modal" class="modal-scrim">
-      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="title-modal-heading">
-        <svg class="title-emblem-svg" viewBox="0 0 120 120">
-          <rect x="8" y="8" width="104" height="104" rx="26" fill="#1e293b" stroke="#38bdf8" stroke-width="4" />
-          <rect x="24" y="42" width="72" height="40" rx="10" fill="#a855f7" stroke="#090d16" stroke-width="3" />
-          <rect x="30" y="48" width="24" height="16" rx="4" fill="#090d16" />
-          <rect x="60" y="48" width="28" height="14" rx="3" fill="#090d16" />
-          <circle cx="40" cy="84" r="9" fill="#090d16" />
-          <circle cx="80" cy="84" r="9" fill="#090d16" />
-          <path d="M52 28h18v-5l10 8-10 8v-5H52z" fill="#facc15" />
-        </svg>
-        <h2 id="title-modal-heading" class="modal-title">Bus Fever 3D: Traffic Escape</h2>
-        <p id="title-modal-sub" class="modal-subtitle">
-          Clear the 3D bus jam, park in angled bays, and board the looping passenger crowd!
-        </p>
+      <div class="modal-card modal-card-saga" role="dialog" aria-modal="true" aria-labelledby="title-modal-heading">
+        <div class="saga-header-top">
+          <div class="saga-brand-row">
+            <svg class="title-emblem-svg" viewBox="0 0 120 120">
+              <rect x="8" y="8" width="104" height="104" rx="26" fill="#1e293b" stroke="#38bdf8" stroke-width="4" />
+              <rect x="24" y="42" width="72" height="40" rx="10" fill="#a855f7" stroke="#090d16" stroke-width="3" />
+              <rect x="30" y="48" width="24" height="16" rx="4" fill="#090d16" />
+              <rect x="60" y="48" width="28" height="14" rx="3" fill="#090d16" />
+              <circle cx="40" cy="84" r="9" fill="#090d16" />
+              <circle cx="80" cy="84" r="9" fill="#090d16" />
+              <path d="M52 28h18v-5l10 8-10 8v-5H52z" fill="#facc15" />
+            </svg>
+            <div class="saga-title-col">
+              <h2 id="title-modal-heading" class="modal-title">Bus Fever 3D: Traffic Escape</h2>
+              <p id="title-modal-sub" class="modal-subtitle">
+                Solve each stage to unlock the next stop on the transit map! Every 10 levels unlocks +1 Parking Bay.
+              </p>
+            </div>
+          </div>
 
-        <div class="modal-stats-row">
-          <div class="stat-tile">
-            <span id="title-stat-lv-kicker" class="stat-tile-kicker">Stage</span>
-            <span id="title-stat-lv-val" class="stat-tile-val">1</span>
+          <div class="modal-stats-row">
+            <div class="stat-tile">
+              <span id="title-stat-lv-kicker" class="stat-tile-kicker">Unlocked</span>
+              <span id="title-stat-lv-val" class="stat-tile-val">1</span>
+            </div>
+            <div class="stat-tile">
+              <span id="title-stat-score-kicker" class="stat-tile-kicker">Best</span>
+              <span id="title-stat-score-val" class="stat-tile-val">0</span>
+            </div>
+            <div class="stat-tile">
+              <span id="title-stat-coins-kicker" class="stat-tile-kicker">Extra Bays</span>
+              <span id="title-stat-coins-val" class="stat-tile-val">0 / 3</span>
+            </div>
           </div>
-          <div class="stat-tile">
-            <span id="title-stat-score-kicker" class="stat-tile-kicker">Best</span>
-            <span id="title-stat-score-val" class="stat-tile-val">0</span>
-          </div>
-          <div class="stat-tile">
-            <span id="title-stat-coins-kicker" class="stat-tile-kicker">Coins</span>
-            <span id="title-stat-coins-val" class="stat-tile-val">150</span>
-          </div>
+        </div>
+
+        <!-- Candy Crush-Style Winding Highway Saga Map -->
+        <div id="title-saga-scroll" class="saga-map-viewport" aria-label="Transit Saga Level Map">
+          <div id="title-level-picker" class="saga-map-canvas"></div>
         </div>
 
         <div class="modal-actions">
@@ -274,12 +285,10 @@
             </button>
           </div>
         </div>
-
-        <div id="title-level-picker" class="level-grid-picker" aria-label="Select Level"></div>
       </div>
     </div>
 
-    <!-- Pause & Level Tools Modal Overlay (100% Dark Mode) -->
+    <!-- Pause Modal Overlay (100% Dark Mode — No Level Picker) -->
     <div id="pause-modal" class="modal-scrim" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pause-modal-heading">
         <h2 id="pause-modal-heading" class="modal-title">Paused</h2>
@@ -290,6 +299,9 @@
           <button id="btn-pause-restart" class="btn-secondary-3d" type="button">
             Restart Stage
           </button>
+          <button id="btn-pause-map" class="btn-secondary-3d" type="button">
+            Transit Saga Map
+          </button>
           <div class="modal-row-2col">
             <button id="btn-pause-time" class="btn-secondary-3d" type="button">
               Lighting: Auto
@@ -299,7 +311,7 @@
             </button>
           </div>
           <button id="btn-pause-unlock-bay" class="btn-secondary-3d" type="button">
-            +1 Parking Bay
+            +1 Parking Bay (Lv.10)
           </button>
           <button id="btn-pause-export" class="btn-secondary-3d" type="button">
             Export Procedural Level JSON
@@ -312,7 +324,6 @@
           hidden
           aria-label="Exported Level JSON"
         ></textarea>
-        <div id="pause-level-picker" class="level-grid-picker" aria-label="Jump to Level"></div>
       </div>
     </div>
 

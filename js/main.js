@@ -7,17 +7,18 @@ import {
   getBusWorldCenter,
 } from './solver.js';
 import { LevelManager } from './levelManager.js';
-import { Renderer3D, GRID_ORIGIN_Z } from './renderer3d.js';
+import { Renderer3D, getDynamicGridOriginZ } from './renderer3d.js';
 import { InputController } from './input.js';
 import { SoundEngine } from './audio.js';
 
 const I18N = {
   en: {
     title: 'Bus Fever 3D: Traffic Escape',
-    subtitle: 'Clear the 3D bus jam, park in angled bays, and board the looping passenger crowd!',
+    subtitle:
+      'Solve each stage to unlock the next stop on the transit map! Every 10 levels unlocks +1 Parking Bay.',
     playNow: 'Play Stage',
     level: 'Level',
-    stage: 'Stage',
+    stage: 'Unlocked',
     queue: 'Queue',
     vip: 'VIP Slot',
     arrange: 'Arrange',
@@ -26,19 +27,24 @@ const I18N = {
     paused: 'Paused',
     resume: 'Resume',
     restart: 'Restart Stage',
+    sagaMapBtn: 'Transit Saga Map',
     unlockBayBtn: '+1 Parking Bay',
     exportJson: 'Export Procedural Level JSON',
     stageClear: 'Stage Clear!',
-    stageClearSub: 'All passengers boarded and every bus escaped the traffic jam!',
+    stageClearSub: 'All passengers boarded and the next stop on the Saga Map is now unlocked!',
     dockFull: 'Parking Bays Full!',
-    dockFullSub: 'All active parking bays are occupied! Auto-sorting & unlocking a bay to continue.',
+    dockFullSub: 'All active parking bays are occupied! Auto-sorting passenger queue to continue.',
     nextLevel: 'Next Level',
     tryAgain: 'Replay Stage',
     score: 'Score',
     best: 'Best',
     coins: 'Coins',
+    extraBays: 'Extra Bays',
     blockedToast: 'Path blocked by another bus!',
-    bayUnlockedToast: 'Unlocked +1 Parking Bay!',
+    bayUnlockedToast: 'Opened +1 Parking Bay!',
+    bayLockedMilestoneToast: 'Reach Level {lvl} to open this +1 Parking Bay!',
+    levelLockedToast: 'Solve Level {prev} first to unlock Level {lvl}!',
+    allBaysOpen: 'All 3 Extra Parking Bays Opened!',
     lighting: 'Lighting',
     modeAuto: 'Auto',
     modeDay: 'Day',
@@ -49,14 +55,14 @@ const I18N = {
     bgmOn: 'BGM On',
     bgmOff: 'BGM Off',
     controlsHint:
-      'TV Remote Arrows / D-Pad: Navigate All Zones & Bays · OK / [A]: Select · [Y] VIP · [X] Arrange · [LB] Jumble · [RB] +1 Bay',
+      'TV Remote Arrows / D-Pad: Navigate All Zones & Bays · OK / [A]: Select · [Y] VIP · [X] Arrange · [LB] Jumble · [RB] +1 Bay (Every 10 Lv)',
   },
   fr: {
     title: 'Bus Fever 3D: Traffic Escape',
-    subtitle: 'Dégagez les bus 3D, garez-vous en épi et embarquez la foule de passagers !',
+    subtitle: 'Terminez chaque niveau pour débloquer le suivant ! +1 Quai tous les 10 niveaux.',
     playNow: 'Jouer le Niveau',
     level: 'Niveau',
-    stage: 'Niveau',
+    stage: 'Débloqué',
     queue: 'File',
     vip: 'Quai VIP',
     arrange: 'Trier',
@@ -65,10 +71,11 @@ const I18N = {
     paused: 'Pause',
     resume: 'Reprendre',
     restart: 'Recommencer',
+    sagaMapBtn: 'Carte des Niveaux',
     unlockBayBtn: '+1 Quai de Bus',
     exportJson: 'Exporter JSON du Niveau',
     stageClear: 'Niveau Terminé !',
-    stageClearSub: 'Tous les passagers sont montés à bord !',
+    stageClearSub: 'Tous les passagers sont montés et le niveau suivant est débloqué !',
     dockFull: 'Quais Complets !',
     dockFullSub: 'Tous les quais actifs sont occupés.',
     nextLevel: 'Niveau Suivant',
@@ -76,8 +83,12 @@ const I18N = {
     score: 'Score',
     best: 'Record',
     coins: 'Pièces',
+    extraBays: 'Quais Extra',
     blockedToast: 'Passage bloqué par un autre bus !',
-    bayUnlockedToast: '+1 Quai débloqué !',
+    bayUnlockedToast: '+1 Quai ouvert !',
+    bayLockedMilestoneToast: 'Atteignez le Niveau {lvl} pour ouvrir ce +1 Quai !',
+    levelLockedToast: 'Terminez le Niveau {prev} pour débloquer le Niveau {lvl} !',
+    allBaysOpen: 'Tous les quais supplémentaires sont ouverts !',
     lighting: 'Éclairage',
     modeAuto: 'Auto',
     modeDay: 'Jour',
@@ -92,10 +103,10 @@ const I18N = {
   },
   es: {
     title: 'Bus Fever 3D: Traffic Escape',
-    subtitle: '¡Despeja el atasco 3D, aparca en las bahías y embarca a los pasajeros!',
+    subtitle: '¡Supera cada nivel para desbloquear el siguiente! +1 Bahía cada 10 niveles.',
     playNow: 'Jugar Nivel',
     level: 'Nivel',
-    stage: 'Nivel',
+    stage: 'Desbloqueado',
     queue: 'Fila',
     vip: 'Bahía VIP',
     arrange: 'Ordenar',
@@ -104,10 +115,11 @@ const I18N = {
     paused: 'Pausa',
     resume: 'Continuar',
     restart: 'Reiniciar Nivel',
+    sagaMapBtn: 'Mapa de Niveles',
     unlockBayBtn: '+1 Bahía Extra',
     exportJson: 'Exportar JSON del Nivel',
     stageClear: '¡Nivel Completado!',
-    stageClearSub: '¡Todos los pasajeros subieron y los autobuses escaparon!',
+    stageClearSub: '¡Todos los pasajeros subieron y desbloqueaste el siguiente nivel!',
     dockFull: '¡Bahías Llenas!',
     dockFullSub: 'Todas las bahías activas están ocupadas.',
     nextLevel: 'Siguiente Nivel',
@@ -115,8 +127,12 @@ const I18N = {
     score: 'Puntos',
     best: 'Mejor',
     coins: 'Monedas',
+    extraBays: 'Bahías Extra',
     blockedToast: '¡Camino bloqueado por otro autobús!',
-    bayUnlockedToast: '¡+1 Bahía desbloqueada!',
+    bayUnlockedToast: '¡+1 Bahía abierta!',
+    bayLockedMilestoneToast: '¡Llega al Nivel {lvl} para abrir esta +1 Bahía!',
+    levelLockedToast: '¡Supera el Nivel {prev} para desbloquear el Nivel {lvl}!',
+    allBaysOpen: '¡Todas las bahías extra abiertas!',
     lighting: 'Luz',
     modeAuto: 'Auto',
     modeDay: 'Día',
@@ -131,10 +147,10 @@ const I18N = {
   },
   ar: {
     title: 'حمى الحافلات 3D: الهروب من الزحام',
-    subtitle: 'فك تشابك الحافلات ثلاثية الأبعاد، اركن في المواقف المائلة، وأركب المسافرين!',
+    subtitle: 'أكمل كل مرحلة لفتح المرحلة التالية على الخريطة! يفتح موقف إضافي كل 10 مراحل.',
     playNow: 'العب المستوى',
     level: 'المستوى',
-    stage: 'المستوى',
+    stage: 'مفتوح',
     queue: 'الطابور',
     vip: 'موقف VIP',
     arrange: 'ترتيب',
@@ -143,10 +159,11 @@ const I18N = {
     paused: 'إيقاف مؤقت',
     resume: 'استئناف',
     restart: 'إعادة المستوى',
+    sagaMapBtn: 'خريطة المراحل',
     unlockBayBtn: '+1 موقف إضافي',
     exportJson: 'تصدير JSON للمستوى',
     stageClear: 'تم اجتياز المستوى!',
-    stageClearSub: 'صعد جميع الركاب وانطلقت كل الحافلات بنجاح!',
+    stageClearSub: 'صعد جميع الركاب وتم فتح المستوى التالي على الخريطة!',
     dockFull: 'المواقف ممتلئة!',
     dockFullSub: 'جميع المواقف مشغولة حالياً.',
     nextLevel: 'المستوى التالي',
@@ -154,8 +171,12 @@ const I18N = {
     score: 'النقاط',
     best: 'الأفضل',
     coins: 'العملات',
+    extraBays: 'مواقف إضافية',
     blockedToast: 'الطريق مسدود بحافلة أخرى!',
     bayUnlockedToast: 'تم فتح موقف إضافي!',
+    bayLockedMilestoneToast: 'صل إلى المستوى {lvl} لفتح هذا الموقف الإضافي!',
+    levelLockedToast: 'أكمل المستوى {prev} أولاً لفتح المستوى {lvl}!',
+    allBaysOpen: 'تم فتح جميع المواقف الإضافية!',
     lighting: 'الإضاءة',
     modeAuto: 'تلقائي',
     modeDay: 'نهار',
@@ -171,6 +192,7 @@ const I18N = {
 };
 
 const LIGHTING_MODES = ['auto', 'day', 'sunset', 'night'];
+const SAGA_TOTAL_NODES = 30;
 
 export class BusFeverGame {
   constructor() {
@@ -195,6 +217,7 @@ export class BusFeverGame {
     this.saveData = {
       currentLevel: 1,
       highestLevel: 1,
+      openedExtraBays: 0, // 0..3 extra bays opened (each requires 10 levels unlocked: Lv.10, Lv.20, Lv.30)
       score: 0,
       bestScore: 0,
       coins: 150,
@@ -275,9 +298,8 @@ export class BusFeverGame {
           if (id === 'restart') {
             this.loadStage(this.saveData.currentLevel);
             this.setGameState('playing');
-          } else if (id === 'next_level') {
-            this.loadStage(this.saveData.currentLevel + 1);
-            this.setGameState('playing');
+          } else if (id === 'saga_map') {
+            this.setGameState('title');
           } else if (id === 'cycle_time') {
             this.cycleTimeOfDay();
           } else if (id === 'toggle_music') {
@@ -336,9 +358,20 @@ export class BusFeverGame {
       }
     }
 
+    // Ensure currentLevel never exceeds highestLevel unless explicitly passed via URL query
+    this.saveData.highestLevel = Math.max(1, Math.floor(this.saveData.highestLevel || 1));
+    this.saveData.currentLevel = Math.min(
+      this.saveData.highestLevel,
+      Math.max(1, Math.floor(this.saveData.currentLevel || 1))
+    );
+
     const lvlMatch = /[?&]level=(\d+)/i.exec(window.location.search);
     if (lvlMatch) {
-      this.saveData.currentLevel = Math.max(1, parseInt(lvlMatch[1], 10));
+      const requestedLvl = Math.max(1, parseInt(lvlMatch[1], 10));
+      this.saveData.currentLevel = requestedLvl;
+      if (requestedLvl > this.saveData.highestLevel) {
+        this.saveData.highestLevel = requestedLvl;
+      }
     }
 
     const timeMatch = /[?&]time=(day|sunset|night|auto)/i.exec(window.location.search);
@@ -383,7 +416,7 @@ export class BusFeverGame {
     if (sdk && typeof sdk.setMenu === 'function') {
       sdk.setMenu([
         { id: 'restart', label: this.t('restart') },
-        { id: 'next_level', label: this.t('nextLevel') },
+        { id: 'saga_map', label: this.t('sagaMapBtn') },
         { id: 'cycle_time', label: `${this.t('lighting')}: Day/Sunset/Night` },
         { id: 'toggle_music', label: this.t('musicOn') },
         { id: 'export_json', label: this.t('exportJson') },
@@ -469,17 +502,22 @@ export class BusFeverGame {
 
   /**
    * Loads a stage (from pack-01.json or Reverse-Peel Generator) and initializes Zone A, B, and C.
+   * Enforces sequential unlocking and 10-level parking bay milestones (Lv.10, Lv.20, Lv.30).
    */
   loadStage(levelNumber) {
-    const lvl = Math.max(1, Math.floor(levelNumber || 1));
+    const requested = Math.max(1, Math.floor(levelNumber || 1));
+    const lvl = Math.min(requested, Math.max(1, this.saveData.highestLevel || 1));
     this.saveData.currentLevel = lvl;
-    if (lvl > this.saveData.highestLevel) {
-      this.saveData.highestLevel = lvl;
-    }
 
-    if (lvl >= 5 && this.saveData.boosters.vip < 1) this.saveData.boosters.vip = 2;
-    if (lvl >= 10 && this.saveData.boosters.arrange < 1) this.saveData.boosters.arrange = 2;
-    if (lvl >= 15 && this.saveData.boosters.shuffle < 1) this.saveData.boosters.shuffle = 2;
+    if (this.saveData.highestLevel >= 5 && this.saveData.boosters.vip < 1) {
+      this.saveData.boosters.vip = 2;
+    }
+    if (this.saveData.highestLevel >= 10 && this.saveData.boosters.arrange < 1) {
+      this.saveData.boosters.arrange = 2;
+    }
+    if (this.saveData.highestLevel >= 15 && this.saveData.boosters.shuffle < 1) {
+      this.saveData.boosters.shuffle = 2;
+    }
 
     this._saveProgress();
 
@@ -494,12 +532,25 @@ export class BusFeverGame {
     this.stageStartSec = this.elapsedSec;
 
     const initialActive = this.appConfig.initialUnlockedBays || 4;
+    const maxAllowedExtraBays = Math.min(3, Math.floor((this.saveData.highestLevel || 1) / 10));
+    const openedExtra = Math.min(
+      maxAllowedExtraBays,
+      Math.max(0, this.saveData.openedExtraBays || 0)
+    );
+
     this.dockSlots = [];
     for (let i = 0; i < 8; i++) {
+      const extraIdx = i - 5; // 0 for Slot 5 (Lv.10), 1 for Slot 6 (Lv.20), 2 for Slot 7 (Lv.30)
+      const requiredLevel = i >= 5 ? (extraIdx + 1) * 10 : 1;
+      const milestoneReached = (this.saveData.highestLevel || 1) >= requiredLevel;
+      const isExtraOpened = i >= 5 && extraIdx < openedExtra && milestoneReached;
+
       this.dockSlots.push({
         index: i,
         isVip: i === 0,
-        unlocked: i === 0 || (i >= 1 && i <= initialActive),
+        requiredLevel,
+        canOpen: i >= 5 && milestoneReached && !isExtraOpened,
+        unlocked: i === 0 || (i >= 1 && i <= initialActive) || isExtraOpened,
         busId: null,
       });
     }
@@ -552,6 +603,8 @@ export class BusFeverGame {
     if (pauseModal) pauseModal.hidden = newState !== 'paused';
     if (gameoverModal) gameoverModal.hidden = newState !== 'gameover';
 
+    this._updateHudDom();
+
     if (newState === 'playing') {
       if (document.activeElement && document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
@@ -562,10 +615,11 @@ export class BusFeverGame {
     } else {
       this.renderer3d?.setFocusedBus(null);
       this.renderer3d?.setFocusedBay(-1);
+      if (newState === 'title') {
+        this._scrollSagaMapToLevel(this.saveData.currentLevel || this.saveData.highestLevel || 1);
+      }
       this._refreshModalButtonsFocus(newState);
     }
-
-    this._updateHudDom();
   }
 
   _refreshModalButtonsFocus(state) {
@@ -577,16 +631,34 @@ export class BusFeverGame {
       this.modalButtons = [];
       return;
     }
-    this.modalButtons = Array.from(
-      container.querySelectorAll('button:not([disabled]):not([hidden])')
-    );
+
+    if (state === 'title') {
+      // Order focusable buttons in Title Modal: Primary Play button first, then Lighting/Music, then unlocked Saga nodes
+      const actionBtns = Array.from(
+        container.querySelectorAll('.modal-actions button:not([disabled]):not([hidden])')
+      );
+      const unlockedNodes = Array.from(
+        container.querySelectorAll('.saga-node-btn:not(.is-locked)')
+      );
+      this.modalButtons = actionBtns.concat(unlockedNodes);
+    } else {
+      this.modalButtons = Array.from(
+        container.querySelectorAll('button:not([disabled]):not([hidden])')
+      );
+    }
+
     this.focusedModalBtnIdx = 0;
     this._applyModalButtonFocus();
   }
 
   _applyModalButtonFocus() {
     for (let i = 0; i < this.modalButtons.length; i++) {
-      this.modalButtons[i].classList.toggle('tv-focused', i === this.focusedModalBtnIdx);
+      const isFocused = i === this.focusedModalBtnIdx;
+      const btn = this.modalButtons[i];
+      btn.classList.toggle('tv-focused', isFocused);
+      if (isFocused && btn.classList.contains('saga-node-btn')) {
+        btn.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
     }
   }
 
@@ -676,7 +748,11 @@ export class BusFeverGame {
   }
 
   /**
-   * Unlocks the next locked '+' parking bay in Zone B (Slots 5, 6, 7).
+   * Opens the next locked '+' parking bay in Zone B (Slots 5, 6, 7).
+   * Enforces the rule: each +1 Parking Bay can ONLY be opened when 10 levels are unlocked for each one:
+   * - Slot 5 (1st extra bay): requires Level 10 (highestLevel >= 10)
+   * - Slot 6 (2nd extra bay): requires Level 20 (highestLevel >= 20)
+   * - Slot 7 (3rd extra bay): requires Level 30 (highestLevel >= 30)
    */
   unlockNextParkingBay(specificBayIdx) {
     this.sound.initInOnStart();
@@ -691,9 +767,27 @@ export class BusFeverGame {
       target = this.dockSlots.findIndex((s, idx) => idx >= 5 && !s.unlocked);
     }
 
-    if (target === -1) return;
+    if (target === -1) {
+      this._flashToast(this.t('allBaysOpen'));
+      return false;
+    }
 
-    this.dockSlots[target].unlocked = true;
+    const slot = this.dockSlots[target];
+    const reqLvl = slot.requiredLevel || (target - 4) * 10;
+    const highestLvl = this.saveData.highestLevel || 1;
+
+    if (highestLvl < reqLvl) {
+      this.sound.playHorn();
+      const msg = this.t('bayLockedMilestoneToast').replace('{lvl}', String(reqLvl));
+      this._flashToast(msg);
+      return false;
+    }
+
+    slot.unlocked = true;
+    slot.canOpen = false;
+    this.saveData.openedExtraBays = Math.max(this.saveData.openedExtraBays || 0, target - 4);
+    this._saveProgress();
+
     this.deadlockTimer = 0;
     this.sound.playBooster();
     this.renderer3d.updateBaySlotsVisuals(this.dockSlots);
@@ -714,6 +808,7 @@ export class BusFeverGame {
 
     this._updateHudFocusVisuals();
     this._updateHudDom();
+    return true;
   }
 
   /**
@@ -974,11 +1069,12 @@ export class BusFeverGame {
     const currentBus =
       this.activeGridBuses.find((b) => b.id === this.focusedBusId) ||
       this.activeGridBuses[0];
+    const dynamicOriginZ = getDynamicGridOriginZ(this.stage.grid.height);
     const curPos = getBusWorldCenter(
       currentBus,
       this.stage.grid.width,
       this.stage.grid.height,
-      GRID_ORIGIN_Z
+      dynamicOriginZ
     );
 
     const dirVec = {
@@ -998,7 +1094,7 @@ export class BusFeverGame {
         candidate,
         this.stage.grid.width,
         this.stage.grid.height,
-        GRID_ORIGIN_Z
+        dynamicOriginZ
       );
       const dx = candPos.worldX - curPos.worldX;
       const dz = candPos.worldZ - curPos.worldZ;
@@ -1155,33 +1251,58 @@ export class BusFeverGame {
     let anyBoardingPossible = false;
 
     if (this.passengerQueue.length > 0) {
-      const frontColor = this.passengerQueue[0];
+      // Because the 3D circle queue continuously turns past the bottom boarding gate,
+      // check the front gate window of the revolving circle (first row / front passenger)
+      // plus the row currently aligned with the bottom gate (uLoop near 0 / 1)
+      const loopRows = this.renderer3d?.loopCapacityRows || 24;
+      const abreast = 5;
+      const loopCap = Math.min(this.passengerQueue.length, loopRows * abreast);
+      const turnPhase = this.renderer3d?.loopTurnPhase || 0;
+      const gateRowIdx = ((loopRows - Math.round(turnPhase * loopRows)) % loopRows + loopRows) % loopRows;
+      const gateWindowStart = Math.min(Math.max(0, gateRowIdx * abreast), Math.max(0, loopCap - 1));
 
+      let matchQueueIdx = -1;
       let matchingActor = null;
       let matchingSlot = null;
-      for (let i = 0; i < this.dockSlots.length; i++) {
-        const slot = this.dockSlots[i];
-        if (!slot.busId) continue;
-        const actor = this.renderer3d.busActors.get(slot.busId);
-        if (
-          actor &&
-          actor.state === 'parked' &&
-          actor.data.color === frontColor &&
-          actor.remainingCapacity > 0
-        ) {
-          matchingActor = actor;
-          matchingSlot = slot;
-          break;
+
+      // Priority 1: Front of queue (index 0)
+      // Priority 2: Passenger currently passing the bottom boarding gate as the circle revolves
+      const candidateIndices = [0];
+      for (let g = 0; g < abreast; g++) {
+        const idx = (gateWindowStart + g) % Math.max(1, loopCap);
+        if (idx < this.passengerQueue.length && !candidateIndices.includes(idx)) {
+          candidateIndices.push(idx);
         }
       }
 
-      if (matchingActor) {
+      for (let c = 0; c < candidateIndices.length && !matchingActor; c++) {
+        const qIdx = candidateIndices[c];
+        const candidateColor = this.passengerQueue[qIdx];
+        for (let i = 0; i < this.dockSlots.length; i++) {
+          const slot = this.dockSlots[i];
+          if (!slot.busId) continue;
+          const actor = this.renderer3d.busActors.get(slot.busId);
+          if (
+            actor &&
+            actor.state === 'parked' &&
+            actor.data.color === candidateColor &&
+            actor.remainingCapacity > 0
+          ) {
+            matchingActor = actor;
+            matchingSlot = slot;
+            matchQueueIdx = qIdx;
+            break;
+          }
+        }
+      }
+
+      if (matchingActor && matchQueueIdx !== -1) {
         anyBoardingPossible = true;
         this.deadlockTimer = 0;
 
         if (this.boardingCooldown <= 0) {
           this.boardingCooldown = 0.105;
-          const boardedColor = this.passengerQueue.shift();
+          const [boardedColor] = this.passengerQueue.splice(matchQueueIdx, 1);
           matchingActor.remainingCapacity = Math.max(0, matchingActor.remainingCapacity - 1);
           matchingActor.boardedCount++;
 
@@ -1452,6 +1573,7 @@ export class BusFeverGame {
 
   _updateHudDom() {
     const lvlNum = this.stage?.level || this.saveData.currentLevel || 1;
+    const highestLvl = Math.max(1, this.saveData.highestLevel || 1);
     const setTxt = (id, text) => {
       const el = document.getElementById(id);
       if (el && el.textContent !== String(text)) el.textContent = String(text);
@@ -1470,24 +1592,42 @@ export class BusFeverGame {
     setTxt('btn-title-music', musicEnabled ? this.t('musicOn') : this.t('musicOff'));
     setTxt('btn-pause-music', musicEnabled ? this.t('musicOn') : this.t('musicOff'));
 
+    // Count extra bays opened (Slots 5, 6, 7)
+    const openedExtraCount = this.dockSlots
+      ? this.dockSlots.filter((s, idx) => idx >= 5 && s.unlocked).length
+      : Math.min(3, this.saveData.openedExtraBays || 0);
+
     // Title Modal stats
-    setTxt('title-stat-lv-val', lvlNum);
+    setTxt('title-stat-lv-val', `${highestLvl}`);
     setTxt('title-stat-score-val', this.saveData.bestScore);
-    setTxt('title-stat-coins-val', this.saveData.coins);
+    setTxt('title-stat-coins-val', `${openedExtraCount} / 3`);
     setTxt('btn-title-play', `${this.t('playNow')} · ${this.t('level')} ${lvlNum}`);
 
-    // Update active level chip highlight in pickers
-    const allChips = document.querySelectorAll('.btn-level-chip');
-    allChips.forEach((chip) => {
-      const chipLvl = parseInt(chip.getAttribute('data-level') || '1', 10);
-      chip.classList.toggle('is-current', chipLvl === lvlNum);
-    });
+    // Update Pause Menu '+1 Parking Bay' button label with 10-level milestone requirement
+    const unlockBayBtn = document.getElementById('btn-pause-unlock-bay');
+    if (unlockBayBtn && this.dockSlots) {
+      const nextLockedSlot = this.dockSlots.find((s, idx) => idx >= 5 && !s.unlocked);
+      if (!nextLockedSlot) {
+        unlockBayBtn.textContent = this.t('allBaysOpen');
+        unlockBayBtn.classList.add('is-disabled-milestone');
+      } else {
+        const reqLvl = nextLockedSlot.requiredLevel || (nextLockedSlot.index - 4) * 10;
+        const canOpenNow = highestLvl >= reqLvl;
+        unlockBayBtn.textContent = canOpenNow
+          ? `${this.t('unlockBayBtn')} (Ready! Lv.${reqLvl})`
+          : `${this.t('unlockBayBtn')} (${this.t('unlockAt')} ${reqLvl})`;
+        unlockBayBtn.classList.toggle('is-disabled-milestone', !canOpenNow);
+      }
+    }
+
+    // Update Candy Crush-style Saga Map nodes & progress line
+    this._updateSagaMapDom(lvlNum, highestLvl);
 
     // Update Bottom Booster Bar cards (Milestone unlocks at Level 5, Level 10, Level 15)
     const unlockAll = this.appConfig.unlockAllBoosters;
-    const vipUnlocked = unlockAll || this.saveData.highestLevel >= 5 || lvlNum >= 5;
-    const arrangeUnlocked = unlockAll || this.saveData.highestLevel >= 10 || lvlNum >= 10;
-    const shuffleUnlocked = unlockAll || this.saveData.highestLevel >= 15 || lvlNum >= 15;
+    const vipUnlocked = unlockAll || highestLvl >= 5 || lvlNum >= 5;
+    const arrangeUnlocked = unlockAll || highestLvl >= 10 || lvlNum >= 10;
+    const shuffleUnlocked = unlockAll || highestLvl >= 15 || lvlNum >= 15;
 
     this._renderBoosterCardDom('vip', vipUnlocked, 5, this.saveData.boosters.vip, this.vipSelectionMode);
     this._renderBoosterCardDom('arrange', arrangeUnlocked, 10, this.saveData.boosters.arrange, false);
@@ -1556,29 +1696,218 @@ export class BusFeverGame {
     }
   }
 
+  /**
+   * Builds the Candy Crush-style Winding Highway Saga Map inside #title-level-picker.
+   * Levels 1..30 wind along an S-curve transit highway with milestone banners at Lv.10, Lv.20, and Lv.30.
+   */
   _buildLevelPickersDom() {
-    const buildInContainer = (containerId) => {
-      const container = document.getElementById(containerId);
-      if (!container) return;
-      container.innerHTML = '';
-      const levels = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15];
-      levels.forEach((lvl) => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn-level-chip';
-        btn.setAttribute('data-level', String(lvl));
-        btn.textContent = `Lv.${lvl}`;
-        btn.addEventListener('click', () => {
-          this.sound.initInOnStart();
-          this.loadStage(lvl);
-          this.setGameState('playing');
-        });
-        container.appendChild(btn);
-      });
+    const container = document.getElementById('title-level-picker');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const totalNodes = Math.max(SAGA_TOTAL_NODES, (this.saveData.highestLevel || 1) + 5);
+    const stepY = 66;
+    const padTop = 44;
+    const totalHeight = padTop * 2 + (totalNodes - 1) * stepY;
+    container.style.height = `${totalHeight}px`;
+
+    const coords = [];
+    for (let i = 0; i < totalNodes; i++) {
+      const lvl = i + 1;
+      const xPct = 50 + Math.sin(i * 0.88) * 29;
+      const svgX = (xPct / 100) * 400;
+      const yPx = padTop + i * stepY;
+      coords.push({ lvl, xPct, svgX, yPx });
+    }
+    this._sagaNodeCoords = coords;
+
+    // Build smooth Catmull-Rom / cubic Bezier SVG path string
+    const buildSvgPath = (pts) => {
+      if (pts.length === 0) return '';
+      let d = `M ${pts[0].svgX.toFixed(1)} ${pts[0].yPx.toFixed(1)}`;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[i];
+        const p1 = pts[i + 1];
+        const midY = (p0.yPx + p1.yPx) / 2;
+        d += ` C ${p0.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${p1.yPx.toFixed(1)}`;
+      }
+      return d;
     };
 
-    buildInContainer('title-level-picker');
-    buildInContainer('pause-level-picker');
+    const fullPathD = buildSvgPath(coords);
+
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('class', 'saga-path-svg');
+    svg.setAttribute('viewBox', `0 0 400 ${totalHeight}`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+
+    // 1. Highway curb outline
+    const roadBorder = document.createElementNS(svgNS, 'path');
+    roadBorder.setAttribute('d', fullPathD);
+    roadBorder.setAttribute('fill', 'none');
+    roadBorder.setAttribute('stroke', '#334155');
+    roadBorder.setAttribute('stroke-width', '26');
+    roadBorder.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(roadBorder);
+
+    // 2. Dark asphalt road surface
+    const roadBase = document.createElementNS(svgNS, 'path');
+    roadBase.setAttribute('d', fullPathD);
+    roadBase.setAttribute('fill', 'none');
+    roadBase.setAttribute('stroke', '#1e293b');
+    roadBase.setAttribute('stroke-width', '20');
+    roadBase.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(roadBase);
+
+    // 3. Glowing unlocked progress trail
+    const progressPath = document.createElementNS(svgNS, 'path');
+    progressPath.setAttribute('id', 'saga-progress-path');
+    progressPath.setAttribute('d', '');
+    progressPath.setAttribute('fill', 'none');
+    progressPath.setAttribute('stroke', '#38bdf8');
+    progressPath.setAttribute('stroke-width', '7');
+    progressPath.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(progressPath);
+
+    // 4. Dashed amber highway center line
+    const centerLine = document.createElementNS(svgNS, 'path');
+    centerLine.setAttribute('d', fullPathD);
+    centerLine.setAttribute('fill', 'none');
+    centerLine.setAttribute('stroke', 'rgba(250, 204, 21, 0.45)');
+    centerLine.setAttribute('stroke-width', '2.5');
+    centerLine.setAttribute('stroke-dasharray', '7 9');
+    centerLine.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(centerLine);
+
+    container.appendChild(svg);
+
+    // Create interactive 3D level node buttons along the winding highway
+    coords.forEach(({ lvl, xPct, yPx }) => {
+      // Milestone banner for Level 10, 20, 30 (+1 Parking Bay Unlock)
+      if (lvl === 10 || lvl === 20 || lvl === 30) {
+        const tag = document.createElement('div');
+        tag.className = 'saga-milestone-tag';
+        tag.setAttribute('data-milestone-lvl', String(lvl));
+        const tagXPct = xPct > 50 ? xPct - 24 : xPct + 24;
+        tag.style.left = `${tagXPct}%`;
+        tag.style.top = `${yPx}px`;
+        tag.textContent = `Lv.${lvl} · +1 BAY`;
+        container.appendChild(tag);
+      }
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'saga-node-btn';
+      btn.setAttribute('data-level', String(lvl));
+      btn.style.left = `${xPct}%`;
+      btn.style.top = `${yPx}px`;
+
+      btn.addEventListener('click', () => {
+        this.sound.initInOnStart();
+        const highestLvl = Math.max(1, this.saveData.highestLevel || 1);
+        if (lvl > highestLvl) {
+          this.sound.playHorn();
+          const msg = this.t('levelLockedToast')
+            .replace('{prev}', String(lvl - 1))
+            .replace('{lvl}', String(lvl));
+          this._flashToast(msg);
+          return;
+        }
+        this.loadStage(lvl);
+        this.setGameState('playing');
+      });
+
+      container.appendChild(btn);
+    });
+  }
+
+  /**
+   * Updates all Saga Map nodes (Completed stars, Frontier 'HERE' bus badge, or Locked padlock).
+   */
+  _updateSagaMapDom(currentLvl, highestLvl) {
+    const container = document.getElementById('title-level-picker');
+    if (!container) return;
+
+    const coords = this._sagaNodeCoords || [];
+    const progressPath = document.getElementById('saga-progress-path');
+    if (progressPath && coords.length > 0) {
+      const unlockedPts = coords.slice(0, Math.min(coords.length, highestLvl));
+      if (unlockedPts.length <= 1) {
+        progressPath.setAttribute('d', '');
+      } else {
+        let d = `M ${unlockedPts[0].svgX.toFixed(1)} ${unlockedPts[0].yPx.toFixed(1)}`;
+        for (let i = 0; i < unlockedPts.length - 1; i++) {
+          const p0 = unlockedPts[i];
+          const p1 = unlockedPts[i + 1];
+          const midY = (p0.yPx + p1.yPx) / 2;
+          d += ` C ${p0.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${p1.yPx.toFixed(1)}`;
+        }
+        progressPath.setAttribute('d', d);
+      }
+    }
+
+    // Update milestone tags (Lv.10, Lv.20, Lv.30)
+    const milestoneTags = container.querySelectorAll('.saga-milestone-tag');
+    milestoneTags.forEach((tag) => {
+      const mLvl = parseInt(tag.getAttribute('data-milestone-lvl') || '10', 10);
+      const earned = highestLvl >= mLvl;
+      tag.classList.toggle('is-earned', earned);
+      tag.textContent = earned ? `Lv.${mLvl} · +1 BAY READY` : `🔒 Lv.${mLvl} · +1 BAY`;
+    });
+
+    const nodes = container.querySelectorAll('.saga-node-btn');
+    nodes.forEach((btn) => {
+      const lvl = parseInt(btn.getAttribute('data-level') || '1', 10);
+      const isCompleted = lvl < highestLvl;
+      const isFrontier = lvl === highestLvl;
+      const isLocked = lvl > highestLvl;
+      const isSelected = lvl === currentLvl;
+
+      btn.classList.toggle('is-completed', isCompleted);
+      btn.classList.toggle('is-frontier', isFrontier);
+      btn.classList.toggle('is-locked', isLocked);
+      btn.classList.toggle('is-selected', isSelected && !isFrontier);
+      btn.setAttribute(
+        'aria-label',
+        isLocked ? `Level ${lvl} Locked` : `Play Level ${lvl}`
+      );
+
+      const desiredStateKey = `${lvl}_${isCompleted ? 'c' : isFrontier ? 'f' : 'l'}`;
+      if (btn.getAttribute('data-render-key') !== desiredStateKey) {
+        btn.setAttribute('data-render-key', desiredStateKey);
+        if (isCompleted) {
+          btn.innerHTML = `
+            <span class="saga-node-stars">★★★</span>
+            <span class="saga-node-num">${lvl}</span>
+          `;
+        } else if (isFrontier) {
+          btn.innerHTML = `
+            <span class="saga-node-bus-pin">🚌 PLAY</span>
+            <span class="saga-node-num">${lvl}</span>
+          `;
+        } else {
+          btn.innerHTML = `
+            <span class="saga-node-num">${lvl}</span>
+            <svg class="saga-node-lock-svg" viewBox="0 0 24 24" fill="none">
+              <path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="#d97706" stroke-width="2.6" stroke-linecap="round"/>
+              <rect x="5" y="10" width="14" height="11" rx="3" fill="#f59e0b" stroke="#b45309" stroke-width="1.5"/>
+            </svg>
+          `;
+        }
+      }
+    });
+  }
+
+  _scrollSagaMapToLevel(targetLvl) {
+    const scrollEl = document.getElementById('title-saga-scroll');
+    const container = document.getElementById('title-level-picker');
+    if (!scrollEl || !container) return;
+    const node = container.querySelector(`.saga-node-btn[data-level="${targetLvl}"]`);
+    if (node instanceof HTMLElement) {
+      const top = Math.max(0, node.offsetTop - scrollEl.clientHeight / 2 + 28);
+      scrollEl.scrollTop = top;
+    }
   }
 
   _applyTranslations() {
@@ -1590,11 +1919,12 @@ export class BusFeverGame {
     setTxt('title-modal-sub', 'subtitle');
     setTxt('title-stat-lv-kicker', 'stage');
     setTxt('title-stat-score-kicker', 'best');
-    setTxt('title-stat-coins-kicker', 'coins');
+    setTxt('title-stat-coins-kicker', 'extraBays');
     setTxt('hud-controls-strip', 'controlsHint');
     setTxt('pause-modal-heading', 'paused');
     setTxt('btn-pause-resume', 'resume');
     setTxt('btn-pause-restart', 'restart');
+    setTxt('btn-pause-map', 'sagaMapBtn');
     setTxt('btn-pause-unlock-bay', 'unlockBayBtn');
     setTxt('btn-pause-export', 'exportJson');
     setTxt('go-stat-lv-kicker', 'stage');
@@ -1615,6 +1945,7 @@ export class BusFeverGame {
     document.getElementById('btn-title-play')?.addEventListener('click', (e) =>
       blurAndRun(e, () => {
         this.sound.initInOnStart();
+        this.loadStage(this.saveData.currentLevel || this.saveData.highestLevel || 1);
         this.setGameState('playing');
       })
     );
@@ -1654,7 +1985,7 @@ export class BusFeverGame {
       blurAndRun(e, () => this.activateBooster('shuffle'))
     );
 
-    // Pause Modal buttons
+    // Pause Modal buttons (No level picker in Pause Menu; includes Transit Saga Map button)
     document.getElementById('btn-pause-resume')?.addEventListener('click', (e) =>
       blurAndRun(e, () => this.setGameState('playing'))
     );
@@ -1662,6 +1993,11 @@ export class BusFeverGame {
       blurAndRun(e, () => {
         this.loadStage(this.saveData.currentLevel);
         this.setGameState('playing');
+      })
+    );
+    document.getElementById('btn-pause-map')?.addEventListener('click', (e) =>
+      blurAndRun(e, () => {
+        this.setGameState('title');
       })
     );
     document.getElementById('btn-pause-time')?.addEventListener('click', (e) =>
@@ -1672,8 +2008,10 @@ export class BusFeverGame {
     );
     document.getElementById('btn-pause-unlock-bay')?.addEventListener('click', (e) =>
       blurAndRun(e, () => {
-        this.unlockNextParkingBay();
-        this.setGameState('playing');
+        const opened = this.unlockNextParkingBay();
+        if (opened) {
+          this.setGameState('playing');
+        }
       })
     );
     document.getElementById('btn-pause-export')?.addEventListener('click', (e) =>
@@ -1684,7 +2022,11 @@ export class BusFeverGame {
     document.getElementById('btn-gameover-next')?.addEventListener('click', (e) =>
       blurAndRun(e, () => {
         if (this.outcomeType === 'defeat') {
-          this.unlockNextParkingBay();
+          // Only open a bay if a 10-level milestone bay is ready; always auto-sort passenger queue
+          const readyBay = this.dockSlots.find((s, idx) => idx >= 5 && !s.unlocked && s.canOpen);
+          if (readyBay) {
+            this.unlockNextParkingBay(readyBay.index);
+          }
           this._performArrangeQueue();
           this.setGameState('playing');
         } else {
