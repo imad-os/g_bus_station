@@ -1,0 +1,6 @@
+{
+  "name": "Bus Fever 3D: Traffic Escape",
+  "description": "3D Bus Jam & Traffic Escape puzzle game for My PC (Samsung Smart TV Tizen 8/9, desktop, and mobile) featuring a 3D looping passenger queue, angled boarding bays, and non-overlapping 3D bus grid.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

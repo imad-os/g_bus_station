@@ -1,0 +1,20 @@
+{
+  "mypc": 1,
+  "id": "bus-fever-3d",
+  "name": "Bus Fever 3D: Traffic Escape",
+  "description": "Clear the 3D bus jam, park in angled bays, and board the looping passenger crowd!",
+  "type": "game",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "version": "1.0.0",
+  "scores": true,
+  "touch": false,
+  "config": {
+    "initialUnlockedBays": 4,
+    "busSpeed": 18,
+    "startingVip": 2,
+    "startingArrange": 2,
+    "startingShuffle": 2,
+    "unlockAllBoosters": false
+  }
+}
