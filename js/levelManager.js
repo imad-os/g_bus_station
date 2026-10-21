@@ -289,7 +289,9 @@ export class LevelManager {
         const data = await res.json();
         if (data && Array.isArray(data.levels)) {
           for (let i = 0; i < data.levels.length; i++) {
-            const sanitized = sanitizeStage(data.levels[i]);
+            const raw = { ...data.levels[i] };
+            delete raw.passengerQueue;
+            const sanitized = sanitizeStage(raw);
             this.levels.set(sanitized.level, sanitized);
           }
         }

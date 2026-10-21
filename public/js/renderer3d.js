@@ -92,19 +92,32 @@ export const TIME_OF_DAY_PRESETS = {
 };
 
 export const BAY_ANGLE = 0.42; // ~24 degrees (\ \ \ \ tilt)
-export const LOT_TOP_EDGE_Z = 0.45; // Fixed top edge of Zone C so buses NEVER overlap Zone B parking bays
+export const LOT_TOP_EDGE_Z = 0.45; // Fixed top edge of Zone C in vertical mode
+export const WIDE_LOT_LEFT_EDGE_X = 1.25; // Fixed left edge of Zone C (Z3) in wide TV mode
+export const WIDE_ASPECT_THRESHOLD = 1.05; // Screens with aspect >= 1.05 use Wide (Z1 | Z2 | Z3) layout
 export const GRID_ORIGIN_Z = 5.25;
 export const ROAD_CENTER_Z = -3.75;
 export const LOOP_CENTER_Z = -8.45;
 export const GATE_POS = new THREE.Vector3(0, 0.15, -5.55);
+export const GATE_POS_WIDE = new THREE.Vector3(-6.7, 0.15, 0);
 
 /**
- * Computes Zone C's center Z from its fixed top edge (LOT_TOP_EDGE_Z = 0.45),
- * guaranteeing a clean 2.5+ world-unit separation corridor below Zone B's parking bays
- * no matter how many rows of buses generate.
+ * Computes Zone C's center Z from its fixed top edge (LOT_TOP_EDGE_Z = 0.45) in vertical mode,
+ * guaranteeing a clean 2.5+ world-unit separation corridor below Zone B's parking bays.
  */
 export function getDynamicGridOriginZ(gridHeight = 6) {
   return LOT_TOP_EDGE_Z + (gridHeight * CELL_SIZE) / 2;
+}
+
+/**
+ * Computes Zone C's center X from its fixed left edge (WIDE_LOT_LEFT_EDGE_X = 1.25) in wide mode,
+ * guaranteeing a clean separation corridor to the right of Zone B's vertical parking bays.
+ */
+export function getDynamicGridOriginX(gridWidth = 6, layoutMode = 'vertical') {
+  if (layoutMode === 'wide') {
+    return WIDE_LOT_LEFT_EDGE_X + (gridWidth * CELL_SIZE) / 2;
+  }
+  return 0;
 }
 
 // Pre-allocated scratch vectors for zero GC in 60Hz loop
@@ -140,16 +153,22 @@ export class Renderer3D {
     this.currentTimePreset = 'night';
     this.headlightOpacity = TIME_OF_DAY_PRESETS.night.headlightOpacity;
 
+    // Dynamic layout mode: 'vertical' (phones) vs 'wide' (TV / desktop: Z1 Left | Z2 Center | Z3 Right)
+    const initW = window.innerWidth || 1280;
+    const initH = window.innerHeight || 720;
+    this.layoutMode = initW / initH >= WIDE_ASPECT_THRESHOLD ? 'wide' : 'vertical';
+
     // Dynamic grid dimensions for Smart Camera Auto-Zoom & Zone B/C separation
     this.currentGridW = 6;
     this.currentGridH = 6;
-    this.currentGridOriginZ = getDynamicGridOriginZ(6);
+    this.currentGridOriginX = getDynamicGridOriginX(6, this.layoutMode);
+    this.currentGridOriginZ = this.layoutMode === 'wide' ? 0 : getDynamicGridOriginZ(6);
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color(TIME_OF_DAY_PRESETS.night.bgHex);
-    this.scene.fog = new THREE.Fog(TIME_OF_DAY_PRESETS.night.fogHex, 95, 165);
+    this.scene.fog = new THREE.Fog(TIME_OF_DAY_PRESETS.night.fogHex, 95, 175);
 
-    this.camera = new THREE.PerspectiveCamera(38, 1, 0.5, 160);
+    this.camera = new THREE.PerspectiveCamera(38, 1, 0.5, 180);
     this.cameraLookTarget = new THREE.Vector3(0, 0, 0.8);
 
     this.renderer = new THREE.WebGLRenderer({
@@ -192,7 +211,8 @@ export class Renderer3D {
     this.worldGroup.add(this.zoneAGroup);
     this.worldGroup.add(this.zoneBGroup);
     this.worldGroup.add(this.zoneCGroup);
-    this.worldGroup.add(this.passengerPoolGroup);
+    // Attach passengerPoolGroup to zoneAGroup so Z1 (walkway + loop + feeder + passengers) transforms as a single unit in Vertical & Wide modes!
+    this.zoneAGroup.add(this.passengerPoolGroup);
     this.worldGroup.add(this.runnersGroup);
 
     // Pre-allocated 3D Passenger Pool (for turning loop circle + waiting feeder line + runners)
@@ -221,6 +241,7 @@ export class Renderer3D {
     this._buildStaticEnvironment();
     this._initPassengerPools();
     this._buildSelectionRings();
+    this._applyLayoutModeTransform();
     this.setTimeOfDay('night');
     this.resize();
   }
@@ -741,7 +762,7 @@ export class Renderer3D {
    * Builds the 8 Angled Parking Bays in Zone B:
    * - Slot 0: Gold VIP bay
    * - Slots 1..4: Unlocked neon-cyan/white bays
-   * - Slots 5..7: Extra bays requiring 10 levels each (Lv.10, Lv.20, Lv.30)
+   * - Slots 5..7: Extra bays unlocked individually with Points/Coins (Spot 1: 10 PTS, Spot 2: 30 PTS, Spot 3: 100 PTS)
    */
   _buildParkingBays() {
     this.bayMeshes = [];
@@ -750,20 +771,21 @@ export class Renderer3D {
     const totalSlots = 8;
     const spacingX = 1.62;
     const startX = -((totalSlots - 1) * spacingX) / 2;
+    const extraBayCosts = [10, 30, 100];
 
     for (let i = 0; i < totalSlots; i++) {
-      const x = startX + i * spacingX;
-      const z = ROAD_CENTER_Z + 0.05;
+      const localX = startX + i * spacingX;
+      const localZ = ROAD_CENTER_Z + 0.05;
       const isVip = i === 0;
       const isDefaultUnlocked = i >= 1 && i <= 4;
-      const reqLvl = i >= 5 ? (i - 4) * 10 : 1;
-      const mode = isVip ? 'vip' : isDefaultUnlocked ? 'active' : `milestone_${reqLvl}`;
+      const pointCost = i >= 5 ? extraBayCosts[i - 5] || 100 : 0;
+      const mode = isVip ? 'vip' : isDefaultUnlocked ? 'active' : `locked_${pointCost}`;
 
       const bayGroup = new THREE.Group();
-      bayGroup.position.set(x, 0.025, z);
+      bayGroup.position.set(localX, 0.025, localZ);
       bayGroup.rotation.y = BAY_ANGLE;
 
-      const tex = this._createBayTexture(mode, reqLvl);
+      const tex = this._createBayTexture(mode, pointCost);
       const planeMat = new THREE.MeshBasicMaterial({
         map: tex,
         transparent: true,
@@ -784,8 +806,13 @@ export class Renderer3D {
       this.zoneBGroup.add(bayGroup);
       this.bayMeshes.push({
         index: i,
-        x,
-        z,
+        localX,
+        x: localX,
+        z: localZ,
+        worldX: localX,
+        worldZ: localZ,
+        worldRotY: BAY_ANGLE,
+        pointCost,
         mode,
         group: bayGroup,
         planeMesh,
@@ -794,7 +821,7 @@ export class Renderer3D {
     }
   }
 
-  _createBayTexture(mode, reqLevel = 10) {
+  _createBayTexture(mode, pointCost = 10) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 512;
@@ -802,7 +829,8 @@ export class Renderer3D {
 
     ctx.clearRect(0, 0, 256, 512);
 
-    const isMilestoneLocked = String(mode).startsWith('milestone_');
+    const isReadyToUnlock = String(mode).startsWith('ready');
+    const isPointLocked = String(mode).startsWith('locked_') || String(mode).startsWith('milestone_');
 
     // Subtle dark recessed stall fill
     ctx.fillStyle =
@@ -810,9 +838,9 @@ export class Renderer3D {
         ? 'rgba(251, 191, 36, 0.09)'
         : mode === 'active'
         ? 'rgba(56, 189, 248, 0.08)'
-        : mode === 'ready'
-        ? 'rgba(34, 197, 94, 0.12)'
-        : 'rgba(15, 23, 42, 0.42)';
+        : isReadyToUnlock
+        ? 'rgba(34, 197, 94, 0.14)'
+        : 'rgba(15, 23, 42, 0.45)';
     ctx.fillRect(26, 28, 204, 456);
 
     const strokeColor =
@@ -820,9 +848,9 @@ export class Renderer3D {
         ? '#fbbf24'
         : mode === 'active'
         ? '#7dd3fc'
-        : mode === 'ready'
+        : isReadyToUnlock
         ? '#4ade80'
-        : 'rgba(100, 116, 139, 0.48)';
+        : 'rgba(100, 116, 139, 0.52)';
 
     ctx.strokeStyle = strokeColor;
     ctx.lineWidth = mode === 'vip' ? 14 : 11;
@@ -866,57 +894,61 @@ export class Renderer3D {
       ctx.textBaseline = 'middle';
       ctx.fillText('VIP', 0, 0);
       ctx.restore();
-    } else if (mode === 'ready') {
-      // Glowing green '+' icon when 10-level milestone is reached and bay can be opened
-      ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
+    } else if (isReadyToUnlock) {
+      // Glowing green '+' icon when the player has enough Coins/Points for the NEXT spot
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.26)';
       ctx.beginPath();
-      ctx.arc(128, 232, 46, 0, Math.PI * 2);
+      ctx.arc(128, 212, 44, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.strokeStyle = '#4ade80';
-      ctx.lineWidth = 15;
+      ctx.lineWidth = 14;
       ctx.beginPath();
-      ctx.moveTo(128 - 26, 232);
-      ctx.lineTo(128 + 26, 232);
-      ctx.moveTo(128, 232 - 26);
-      ctx.lineTo(128, 232 + 26);
+      ctx.moveTo(128 - 24, 212);
+      ctx.lineTo(128 + 24, 212);
+      ctx.moveTo(128, 212 - 24);
+      ctx.lineTo(128, 212 + 24);
       ctx.stroke();
 
-      ctx.fillStyle = '#86efac';
-      ctx.font = '900 30px "Plus Jakarta Sans", sans-serif';
+      ctx.fillStyle = '#fef08a';
+      ctx.font = '900 32px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText('OPEN', 128, 316);
-    } else if (isMilestoneLocked) {
-      // Gold padlock + Lv.10 / Lv.20 / Lv.30 milestone badge
+      ctx.fillText(`${pointCost} PTS`, 128, 294);
+
+      ctx.fillStyle = '#86efac';
+      ctx.font = '900 26px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText('UNLOCK', 128, 336);
+    } else if (isPointLocked) {
+      // Gold padlock + 10 PTS / 30 PTS / 100 PTS badge
       ctx.strokeStyle = '#d97706';
       ctx.lineWidth = 10;
       ctx.beginPath();
-      ctx.arc(128, 195, 22, Math.PI, 0, false);
+      ctx.arc(128, 190, 22, Math.PI, 0, false);
       ctx.stroke();
 
       ctx.fillStyle = '#f59e0b';
       ctx.strokeStyle = '#b45309';
       ctx.lineWidth = 5;
       ctx.beginPath();
-      ctx.roundRect(96, 195, 64, 50, 12);
+      ctx.roundRect(96, 190, 64, 50, 12);
       ctx.fill();
       ctx.stroke();
 
       ctx.fillStyle = '#451a03';
       ctx.beginPath();
-      ctx.arc(128, 220, 7, 0, Math.PI * 2);
+      ctx.arc(128, 215, 7, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.fillStyle = '#fef08a';
-      ctx.font = '900 34px "Plus Jakarta Sans", sans-serif';
+      ctx.font = '900 33px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`Lv.${reqLevel}`, 128, 290);
+      ctx.fillText(`${pointCost} PTS`, 128, 286);
 
       ctx.fillStyle = '#94a3b8';
-      ctx.font = '800 24px "Plus Jakarta Sans", sans-serif';
-      ctx.fillText('+1 BAY', 128, 332);
+      ctx.font = '800 23px "Plus Jakarta Sans", sans-serif';
+      ctx.fillText('+1 SPOT', 128, 328);
     }
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -926,27 +958,129 @@ export class Renderer3D {
   }
 
   /**
-   * Updates bay slot visual state when unlocked or when 10-level milestones are reached.
+   * Updates bay slot visual state for individual point-based unlocking (10 / 30 / 100 PTS).
    */
   updateBaySlotsVisuals(dockSlots) {
     for (let i = 0; i < this.bayMeshes.length; i++) {
       const bay = this.bayMeshes[i];
       const slotInfo = dockSlots[i];
       if (!slotInfo) continue;
-      const reqLvl = slotInfo.requiredLevel || (i >= 5 ? (i - 4) * 10 : 1);
+      const pointCost =
+        slotInfo.pointCost || slotInfo.requiredPoints || (i === 5 ? 10 : i === 6 ? 30 : 100);
       const desiredMode = slotInfo.isVip
         ? 'vip'
         : slotInfo.unlocked
         ? 'active'
         : slotInfo.canOpen
-        ? 'ready'
-        : `milestone_${reqLvl}`;
-      if (bay.mode !== desiredMode) {
+        ? `ready_${pointCost}`
+        : `locked_${pointCost}`;
+      if (bay.mode !== desiredMode || bay.pointCost !== pointCost) {
         bay.mode = desiredMode;
+        bay.pointCost = pointCost;
         if (bay.planeMat.map) bay.planeMat.map.dispose();
-        bay.planeMat.map = this._createBayTexture(desiredMode, reqLvl);
+        bay.planeMat.map = this._createBayTexture(desiredMode, pointCost);
         bay.planeMat.needsUpdate = true;
       }
+    }
+  }
+
+  /**
+   * Computes the world-space position & rotation of a parking bay in either 'vertical' or 'wide' layout.
+   */
+  getBayWorldPose(bayIndex) {
+    const bay = this.bayMeshes[bayIndex];
+    if (!bay) return { worldX: 0, worldZ: ROAD_CENTER_Z, worldRotY: BAY_ANGLE };
+    return {
+      worldX: bay.worldX,
+      worldZ: bay.worldZ,
+      worldRotY: bay.worldRotY,
+    };
+  }
+
+  /**
+   * Applies the active layout mode ('vertical' for phones vs 'wide' Z1 | Z2 | Z3 for TV/wide screens)
+   * across Zone A (Z1), Zone B (Z2), and Zone C (Z3).
+   */
+  _applyLayoutModeTransform() {
+    const isWide = this.layoutMode === 'wide';
+
+    if (isWide) {
+      // Z1 (Left Column): Rotate Zone A by +90 deg so the turning loop & feeder queue sit on the left
+      // and the Boarding Gate faces right toward Z2
+      this.zoneAGroup.position.set(-1.15, 0, 0);
+      this.zoneAGroup.rotation.y = Math.PI / 2;
+
+      // Z2 (Center Column): Rotate Zone B by +90 deg so the 8 angled parking bays form a vertical column in the center
+      this.zoneBGroup.position.set(0.85, 0, 0);
+      this.zoneBGroup.rotation.y = Math.PI / 2;
+    } else {
+      // Vertical Phone Mode: Z1 Top -> Z2 Middle -> Z3 Bottom
+      this.zoneAGroup.position.set(0, 0, 0);
+      this.zoneAGroup.rotation.y = 0;
+
+      this.zoneBGroup.position.set(0, 0, 0);
+      this.zoneBGroup.rotation.y = 0;
+    }
+
+    // Update each parking bay's local & world coordinates so index 0..7 is Left->Right in vertical mode
+    // and Top->Bottom in wide mode
+    for (let i = 0; i < this.bayMeshes.length; i++) {
+      const bay = this.bayMeshes[i];
+      if (isWide) {
+        bay.x = -bay.localX;
+        bay.group.position.set(bay.x, 0.025, bay.z);
+        bay.worldX = 0.85 + bay.z; // -2.85 in world space
+        bay.worldZ = bay.localX;   // -5.67 (top) to +5.67 (bottom)
+        bay.worldRotY = Math.PI / 2 + BAY_ANGLE;
+      } else {
+        bay.x = bay.localX;
+        bay.group.position.set(bay.x, 0.025, bay.z);
+        bay.worldX = bay.localX;
+        bay.worldZ = bay.z;
+        bay.worldRotY = BAY_ANGLE;
+      }
+    }
+
+    if (this.focusedBayIndex >= 0 && this.bayMeshes[this.focusedBayIndex] && this.bayFocusMesh) {
+      const fb = this.bayMeshes[this.focusedBayIndex];
+      this.bayFocusMesh.position.x = fb.x;
+      this.bayFocusMesh.position.z = fb.z;
+    }
+
+    // Reposition Zone C (Z3) pad, rim, and any active buses when switching layout mode
+    this.currentGridOriginX = getDynamicGridOriginX(this.currentGridW, this.layoutMode);
+    this.currentGridOriginZ = isWide ? 0 : getDynamicGridOriginZ(this.currentGridH);
+
+    if (this.lotRimMesh) {
+      this.lotRimMesh.position.set(this.currentGridOriginX, -0.02, this.currentGridOriginZ);
+    }
+    if (this.lotPadMesh) {
+      this.lotPadMesh.position.set(this.currentGridOriginX, 0.012, this.currentGridOriginZ);
+    }
+
+    for (const actor of this.busActors.values()) {
+      if (actor.state === 'grid' || actor.state === 'bumping') {
+        const posInfo = getBusWorldCenter(
+          actor.data,
+          this.currentGridW,
+          this.currentGridH,
+          this.currentGridOriginZ,
+          this.currentGridOriginX
+        );
+        actor.baseX = posInfo.worldX;
+        actor.baseZ = posInfo.worldZ;
+        actor.baseRotY = posInfo.rotY;
+        actor.group.position.set(posInfo.worldX, 0, posInfo.worldZ);
+        actor.group.rotation.y = posInfo.rotY;
+      } else if (actor.state === 'parked' && actor.bayIndex >= 0) {
+        const pose = this.getBayWorldPose(actor.bayIndex);
+        actor.group.position.set(pose.worldX, 0, pose.worldZ);
+        actor.group.rotation.y = pose.worldRotY;
+      }
+    }
+
+    if (this.focusedBusId) {
+      this.setFocusedBus(this.focusedBusId);
     }
   }
 
@@ -1108,7 +1242,8 @@ export class Renderer3D {
     const gridH = stage.grid.height;
     this.currentGridW = gridW;
     this.currentGridH = gridH;
-    this.currentGridOriginZ = getDynamicGridOriginZ(gridH);
+    this.currentGridOriginX = getDynamicGridOriginX(gridW, this.layoutMode);
+    this.currentGridOriginZ = this.layoutMode === 'wide' ? 0 : getDynamicGridOriginZ(gridH);
 
     // Textured dark basalt stone paver pad beneath the grid with recessed cell borders
     if (this.lotPadMesh) {
@@ -1122,11 +1257,11 @@ export class Renderer3D {
     const padW = gridW * CELL_SIZE;
     const padH = gridH * CELL_SIZE;
 
-    // Outer dark steel curb framing the puzzle grid (top edge fixed at LOT_TOP_EDGE_Z = 0.45)
+    // Outer dark steel curb framing the puzzle grid
     const rimGeo = new THREE.BoxGeometry(padW + 0.55, 0.06, padH + 0.55);
     const rimMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
     this.lotRimMesh = new THREE.Mesh(rimGeo, rimMat);
-    this.lotRimMesh.position.set(0, -0.02, this.currentGridOriginZ);
+    this.lotRimMesh.position.set(this.currentGridOriginX, -0.02, this.currentGridOriginZ);
     this.zoneCGroup.add(this.lotRimMesh);
 
     const padGeo = new THREE.PlaneGeometry(padW, padH);
@@ -1138,12 +1273,18 @@ export class Renderer3D {
     });
     this.lotPadMesh = new THREE.Mesh(padGeo, this.lotPadMat);
     this.lotPadMesh.rotation.x = -Math.PI / 2;
-    this.lotPadMesh.position.set(0, 0.012, this.currentGridOriginZ);
+    this.lotPadMesh.position.set(this.currentGridOriginX, 0.012, this.currentGridOriginZ);
     this.zoneCGroup.add(this.lotPadMesh);
 
     for (let i = 0; i < stage.buses.length; i++) {
       const busData = stage.buses[i];
-      const posInfo = getBusWorldCenter(busData, gridW, gridH, this.currentGridOriginZ);
+      const posInfo = getBusWorldCenter(
+        busData,
+        gridW,
+        gridH,
+        this.currentGridOriginZ,
+        this.currentGridOriginX
+      );
       const busGroup = this._createCompositeBusMesh(busData);
 
       busGroup.position.set(posInfo.worldX, 0, posInfo.worldZ);
@@ -1172,6 +1313,30 @@ export class Renderer3D {
 
     // Automatically re-frame camera zoom to fit the current stage's grid dimensions
     this.resize();
+  }
+
+  /**
+   * Dynamically recolors an existing 3D bus actor (used by the 1-button Dock-Full Continue
+   * to change the last parked bus's color to match the front waiting passenger color).
+   */
+  recolorBusActor(busId, newColorName) {
+    const actor = this.busActors.get(busId);
+    if (!actor) return false;
+    const palette = COLOR_PALETTE_HEX[newColorName] || COLOR_PALETTE_HEX.purple;
+    actor.data.color = newColorName;
+    if (actor.group.userData?.chassisMat) {
+      actor.group.userData.chassisMat.color.setHex(palette.dark);
+    }
+    if (actor.group.userData?.bodyMat) {
+      actor.group.userData.bodyMat.color.setHex(palette.main);
+      actor.group.userData.bodyMat.emissive.setHex(palette.dark);
+    }
+    if (actor.group.userData?.roofCapMat) {
+      actor.group.userData.roofCapMat.color.setHex(palette.light);
+      actor.group.userData.roofCapMat.emissive.setHex(palette.main);
+    }
+    actor.bounceTimer = 0.22;
+    return true;
   }
 
   /**
@@ -1230,6 +1395,12 @@ export class Renderer3D {
     const roofCapMesh = new THREE.Mesh(roofCapGeo, roofCapMat);
     roofCapMesh.position.y = meshHeight + 0.04;
     group.add(roofCapMesh);
+
+    group.userData = {
+      chassisMat,
+      bodyMat,
+      roofCapMat,
+    };
 
     // 5. Dark front windshield (at -Z local forward edge)
     const glassMat = new THREE.MeshPhongMaterial({
@@ -1383,7 +1554,7 @@ export class Renderer3D {
   }
 
   /**
-   * Triggers the Unblocked Bus 3-Segment Waypoint Drive-to-Bay Animation.
+   * Triggers the Unblocked Bus Waypoint Drive-to-Bay Animation for both 'vertical' and 'wide' layouts.
    */
   triggerDriveToBay(busId, bayIndex, gridWidth, gridHeight) {
     const actor = this.busActors.get(busId);
@@ -1396,56 +1567,98 @@ export class Renderer3D {
     const startX = actor.group.position.x;
     const startZ = actor.group.position.z;
     const dir = actor.data.dir;
+    const pose = this.getBayWorldPose(bayIndex);
 
     const halfGridW = (gridWidth * CELL_SIZE) / 2 + 0.82;
     const halfGridH = (gridHeight * CELL_SIZE) / 2 + 0.85;
-    const roadApproachZ = ROAD_CENTER_Z + 1.15;
-
     const waypoints = [];
 
-    if (dir === 'N') {
-      waypoints.push({ x: startX, z: roadApproachZ, rotY: 0 });
-      if (Math.abs(startX - bay.x) > 0.3) {
+    if (this.layoutMode === 'wide') {
+      // Wide Layout: Z3 is on the Right (centered at currentGridOriginX, Z=0), Z2 bays are in the Center (X = -2.85)
+      const originX = this.currentGridOriginX || getDynamicGridOriginX(gridWidth, 'wide');
+      const roadApproachX = -1.55;
+      const topLaneZ = -halfGridH;
+      const bottomLaneZ = halfGridH;
+      const rightLaneX = originX + halfGridW;
+
+      if (dir === 'W') {
+        waypoints.push({ x: roadApproachX, z: startZ, rotY: Math.PI / 2 });
+      } else if (dir === 'N') {
+        waypoints.push({ x: startX, z: topLaneZ, rotY: 0 });
+        waypoints.push({ x: roadApproachX, z: topLaneZ, rotY: Math.PI / 2 });
+      } else if (dir === 'S') {
+        waypoints.push({ x: startX, z: bottomLaneZ, rotY: Math.PI });
+        waypoints.push({ x: roadApproachX, z: bottomLaneZ, rotY: Math.PI / 2 });
+      } else {
+        // dir === 'E'
+        const laneZ = startZ <= 0 ? topLaneZ : bottomLaneZ;
+        waypoints.push({ x: rightLaneX, z: startZ, rotY: -Math.PI / 2 });
         waypoints.push({
-          x: bay.x + 0.35,
+          x: rightLaneX,
+          z: laneZ,
+          rotY: laneZ < startZ ? 0 : Math.PI,
+        });
+        waypoints.push({ x: roadApproachX, z: laneZ, rotY: Math.PI / 2 });
+      }
+
+      waypoints.push({
+        x: roadApproachX,
+        z: pose.worldZ,
+        rotY: pose.worldZ < startZ ? 0 : Math.PI,
+      });
+      waypoints.push({
+        x: pose.worldX,
+        z: pose.worldZ,
+        rotY: pose.worldRotY,
+      });
+    } else {
+      // Vertical Layout: Z3 is on the Bottom, Z2 bays are in the Middle (Z = -3.70)
+      const roadApproachZ = ROAD_CENTER_Z + 1.15;
+
+      if (dir === 'N') {
+        waypoints.push({ x: startX, z: roadApproachZ, rotY: 0 });
+        if (Math.abs(startX - pose.worldX) > 0.3) {
+          waypoints.push({
+            x: pose.worldX + 0.35,
+            z: roadApproachZ,
+            rotY: startX < pose.worldX ? -Math.PI / 2 : Math.PI / 2,
+          });
+        }
+      } else if (dir === 'W') {
+        const leftLaneX = Math.min(-halfGridW, startX - 1.1);
+        waypoints.push({ x: leftLaneX, z: startZ, rotY: Math.PI / 2 });
+        waypoints.push({ x: leftLaneX, z: roadApproachZ, rotY: 0 });
+        waypoints.push({ x: pose.worldX + 0.35, z: roadApproachZ, rotY: -Math.PI / 2 });
+      } else if (dir === 'E') {
+        const rightLaneX = Math.max(halfGridW, startX + 1.1);
+        waypoints.push({ x: rightLaneX, z: startZ, rotY: -Math.PI / 2 });
+        waypoints.push({ x: rightLaneX, z: roadApproachZ, rotY: 0 });
+        waypoints.push({ x: pose.worldX + 0.35, z: roadApproachZ, rotY: Math.PI / 2 });
+      } else {
+        // dir === 'S'
+        const originZ = this.currentGridOriginZ || getDynamicGridOriginZ(gridHeight);
+        const bottomLaneZ = originZ + halfGridH;
+        const sideLaneX = startX <= 0 ? -halfGridW : halfGridW;
+        waypoints.push({ x: startX, z: bottomLaneZ, rotY: Math.PI });
+        waypoints.push({
+          x: sideLaneX,
+          z: bottomLaneZ,
+          rotY: sideLaneX < startX ? Math.PI / 2 : -Math.PI / 2,
+        });
+        waypoints.push({ x: sideLaneX, z: roadApproachZ, rotY: 0 });
+        waypoints.push({
+          x: pose.worldX + 0.35,
           z: roadApproachZ,
-          rotY: startX < bay.x ? -Math.PI / 2 : Math.PI / 2,
+          rotY: sideLaneX < pose.worldX ? -Math.PI / 2 : Math.PI / 2,
         });
       }
-    } else if (dir === 'W') {
-      const leftLaneX = Math.min(-halfGridW, startX - 1.1);
-      waypoints.push({ x: leftLaneX, z: startZ, rotY: Math.PI / 2 });
-      waypoints.push({ x: leftLaneX, z: roadApproachZ, rotY: 0 });
-      waypoints.push({ x: bay.x + 0.35, z: roadApproachZ, rotY: -Math.PI / 2 });
-    } else if (dir === 'E') {
-      const rightLaneX = Math.max(halfGridW, startX + 1.1);
-      waypoints.push({ x: rightLaneX, z: startZ, rotY: -Math.PI / 2 });
-      waypoints.push({ x: rightLaneX, z: roadApproachZ, rotY: 0 });
-      waypoints.push({ x: bay.x + 0.35, z: roadApproachZ, rotY: Math.PI / 2 });
-    } else {
-      // dir === 'S'
-      const originZ = this.currentGridOriginZ || getDynamicGridOriginZ(gridHeight);
-      const bottomLaneZ = originZ + halfGridH;
-      const sideLaneX = startX <= 0 ? -halfGridW : halfGridW;
-      waypoints.push({ x: startX, z: bottomLaneZ, rotY: Math.PI });
+
       waypoints.push({
-        x: sideLaneX,
-        z: bottomLaneZ,
-        rotY: sideLaneX < startX ? Math.PI / 2 : -Math.PI / 2,
-      });
-      waypoints.push({ x: sideLaneX, z: roadApproachZ, rotY: 0 });
-      waypoints.push({
-        x: bay.x + 0.35,
-        z: roadApproachZ,
-        rotY: sideLaneX < bay.x ? -Math.PI / 2 : Math.PI / 2,
+        x: pose.worldX,
+        z: pose.worldZ,
+        rotY: pose.worldRotY,
       });
     }
-
-    waypoints.push({
-      x: bay.x,
-      z: bay.z,
-      rotY: BAY_ANGLE,
-    });
 
     actor.waypoints = waypoints;
     actor.waypointIdx = 0;
@@ -1459,13 +1672,15 @@ export class Renderer3D {
     const bay = this.bayMeshes[bayIndex];
     if (!actor || !bay) return;
 
+    const pose = this.getBayWorldPose(bayIndex);
     actor.state = 'helilift';
     actor.bayIndex = bayIndex;
     actor.heliProgress = 0;
     actor.heliStartX = actor.group.position.x;
     actor.heliStartZ = actor.group.position.z;
-    actor.heliTargetX = bay.x;
-    actor.heliTargetZ = bay.z;
+    actor.heliTargetX = pose.worldX;
+    actor.heliTargetZ = pose.worldZ;
+    actor.heliTargetRotY = pose.worldRotY;
   }
 
   /**
@@ -1491,9 +1706,11 @@ export class Renderer3D {
       return;
     }
 
+    const gateOrigin = this.layoutMode === 'wide' ? GATE_POS_WIDE : GATE_POS;
+
     this._setPassengerNodeColor(runnerNode, colorName);
     runnerNode.group.visible = true;
-    runnerNode.group.position.copy(GATE_POS);
+    runnerNode.group.position.copy(gateOrigin);
     runnerNode.group.scale.set(1, 1, 1);
 
     this.queueVisualScroll += 0.25;
@@ -1502,34 +1719,50 @@ export class Renderer3D {
       node: runnerNode,
       targetBusId,
       progress: 0,
-      startX: GATE_POS.x + (Math.random() - 0.5) * 0.4,
-      startZ: GATE_POS.z,
+      startX: gateOrigin.x + (Math.random() - 0.5) * 0.35,
+      startZ: gateOrigin.z + (Math.random() - 0.5) * 0.35,
       targetX: actor.group.position.x,
-      targetZ: actor.group.position.z - 0.35,
+      targetZ: actor.group.position.z - (this.layoutMode === 'wide' ? 0 : 0.35),
       onArrive: onArriveCallback,
     });
   }
 
   /**
-   * Triggers a full parked bus to pull out of its angled bay and depart off-screen to the right.
+   * Triggers a full parked bus to pull out of its angled bay and depart off-screen.
    */
   triggerBusDeparture(busId, onGoneCallback) {
     const actor = this.busActors.get(busId);
     if (!actor) return;
     actor.state = 'departing';
     actor.onGone = onGoneCallback;
-    actor.waypoints = [
-      {
-        x: actor.group.position.x + 0.8,
-        z: ROAD_CENTER_Z - 0.25,
-        rotY: -Math.PI / 2,
-      },
-      {
-        x: 16.5,
-        z: ROAD_CENTER_Z - 0.25,
-        rotY: -Math.PI / 2,
-      },
-    ];
+
+    if (this.layoutMode === 'wide') {
+      actor.waypoints = [
+        {
+          x: -3.2,
+          z: actor.group.position.z - 0.8,
+          rotY: 0,
+        },
+        {
+          x: -3.2,
+          z: -16.5,
+          rotY: 0,
+        },
+      ];
+    } else {
+      actor.waypoints = [
+        {
+          x: actor.group.position.x + 0.8,
+          z: ROAD_CENTER_Z - 0.25,
+          rotY: -Math.PI / 2,
+        },
+        {
+          x: 16.5,
+          z: ROAD_CENTER_Z - 0.25,
+          rotY: -Math.PI / 2,
+        },
+      ];
+    }
     actor.waypointIdx = 0;
   }
 
@@ -1537,7 +1770,7 @@ export class Renderer3D {
    * Updates the 3D Passenger Queue positions in tightly packed rows of 5 abreast:
    * - Rows 0..23 (up to 120 passengers) continuously revolve around the closed oval loop (`this.loopCurve`)
    *   at a slow, steady pace (`this.loopTurnPhase`).
-   * - Rows 24+ wait in line along the stationary top-right feeder walkway (`this.feederCurve`) and advance
+   * - Rows 24+ wait in line along the stationary feeder walkway (`this.feederCurve`) and advance
    *   into the turning circle as front passengers board buses.
    */
   syncPassengerQueueVisuals(passengerQueue, elapsedSec) {
@@ -1573,7 +1806,7 @@ export class Renderer3D {
         this.loopCurve.getPointAt(uLoop, _curvePt);
         this.loopCurve.getTangentAt(uLoop, _curveTan);
       } else {
-        // Overflow Feeder Line (top-right walkway): waits in line and steps forward as passengers board
+        // Overflow Feeder Line: waits in line and steps forward as passengers board
         const feederRow = rowIdx - loopRows + this.queueVisualScroll;
         const uFeeder = Math.min(0.985, 0.035 + feederRow * 0.042);
         this.feederCurve.getPointAt(uFeeder, _curvePt);
@@ -1749,9 +1982,15 @@ export class Renderer3D {
         }
       } else if (actor.state === 'helilift') {
         actor.heliProgress += dt * 1.9;
+        const targetRot =
+          actor.heliTargetRotY !== undefined
+            ? actor.heliTargetRotY
+            : this.layoutMode === 'wide'
+            ? Math.PI / 2 + BAY_ANGLE
+            : BAY_ANGLE;
         if (actor.heliProgress >= 1) {
           actor.group.position.set(actor.heliTargetX, 0, actor.heliTargetZ);
-          actor.group.rotation.y = BAY_ANGLE;
+          actor.group.rotation.y = targetRot;
           actor.state = 'parked';
           actor.bounceTimer = 0.18;
           onBusArrivedInBay?.(actor.id, actor.bayIndex);
@@ -1764,7 +2003,7 @@ export class Renderer3D {
             actor.heliStartZ + (actor.heliTargetZ - actor.heliStartZ) * smooth;
           actor.group.position.y = Math.sin(t * Math.PI) * 3.8;
           actor.group.rotation.y =
-            actor.baseRotY + (BAY_ANGLE - actor.baseRotY) * smooth;
+            actor.baseRotY + (targetRot - actor.baseRotY) * smooth;
         }
       }
     }
@@ -1790,10 +2029,11 @@ export class Renderer3D {
     const badges = [];
     for (const actor of this.busActors.values()) {
       if (actor.state !== 'parked' || actor.remainingCapacity <= 0) continue;
+      const rot = actor.group.rotation.y;
       _projVec.set(
-        actor.group.position.x + Math.sin(BAY_ANGLE) * 1.38,
-        0.48,
-        actor.group.position.z + Math.cos(BAY_ANGLE) * 1.38
+        actor.group.position.x + Math.sin(rot) * 1.38,
+        0.52,
+        actor.group.position.z + Math.cos(rot) * 1.38
       );
       _projVec.project(this.camera);
       if (_projVec.z >= -1 && _projVec.z <= 1) {
@@ -1817,55 +2057,86 @@ export class Renderer3D {
   }
 
   /**
-   * Smart Camera Auto-Zoom:
-   * Dynamically frames Zone A (Turning Loop + Feeder Line), Zone B (8 Angled Parking Bays),
-   * the Separation Plaza, and Zone C (all generated vehicles across any gridWidth x gridHeight)
-   * so all vehicles are 100% visible without overlapping the parking bays or HUD.
+   * Smart Dual-Mode Camera Auto-Zoom:
+   * - Mode 1 ('vertical', aspect < 1.05): Frames Top Z1 (Passenger Queue) -> Middle Z2 (Parking Bays) -> Bottom Z3 (Vehicle Lot).
+   * - Mode 2 ('wide', aspect >= 1.05): Frames Left Z1 (Passenger Queue) | Center Z2 (Parking Bays) | Right Z3 (Vehicle Lot).
+   * Automatically zooms out as more buses/cars generate so 100% of transportation vehicles stay visible.
    */
   resize() {
     const w = window.innerWidth || 1280;
     const h = window.innerHeight || 720;
     const aspect = w / h;
 
+    const desiredLayout = aspect >= WIDE_ASPECT_THRESHOLD ? 'wide' : 'vertical';
+    if (desiredLayout !== this.layoutMode) {
+      this.layoutMode = desiredLayout;
+      this._applyLayoutModeTransform();
+    }
+
     this.camera.aspect = aspect;
 
     const gridW = this.currentGridW || 6;
     const gridH = this.currentGridH || 6;
-    const lotBottomZ = LOT_TOP_EDGE_Z + gridH * CELL_SIZE;
 
-    // World bounds to keep 100% framed between top HUD and bottom booster dock
-    const worldTopZ = -13.2;
-    const worldBottomZ = lotBottomZ + 2.8;
-    const totalDepthZ = worldBottomZ - worldTopZ; // ~25.6 for 6x6, ~28.8 for 8x8, ~30.4 for 9x9
-    const baselineDepthZ = 25.0;
-    const depthZoomFactor = Math.max(1.0, totalDepthZ / baselineDepthZ);
+    if (this.layoutMode === 'wide') {
+      // Wide TV / Desktop Layout: Z1 (Left: X ~ -14.2..-6.5) | Z2 (Center: X ~ -2.85) | Z3 (Right: X ~ 1.25 .. 1.25 + gridW * CELL_SIZE)
+      const worldLeftX = -14.8;
+      const worldRightX = WIDE_LOT_LEFT_EDGE_X + gridW * CELL_SIZE + 1.8;
+      const totalWidthX = worldRightX - worldLeftX; // ~27.5 for 6x6 up to ~32.5 for 9x9
+      const lookX = (worldLeftX + worldRightX) * 0.5 + 0.2;
 
-    // Ensure wide grids (7, 8, 9 cols) and all 8 parking bays fit horizontally
-    const requiredWorldWidth = Math.max(15.2, gridW * CELL_SIZE + 4.4);
-    const baselineWidth = 14.5;
-    const widthZoomFactor = Math.max(1.0, requiredWorldWidth / baselineWidth);
+      const worldTopZ = -Math.max(8.2, (gridH * CELL_SIZE) * 0.5 + 2.4);
+      const worldBottomZ = Math.max(8.2, (gridH * CELL_SIZE) * 0.5 + 2.6);
+      const totalDepthZ = worldBottomZ - worldTopZ;
+      const lookZ = 0.25;
 
-    // Center the camera look target between Zone A/B and the dynamic bottom of Zone C
-    let lookZ = (worldTopZ + worldBottomZ) * 0.5 - 0.15;
-    let camHeight = 34.5 * Math.max(depthZoomFactor, widthZoomFactor * 0.92);
-    let camZ = lookZ + camHeight * 0.63;
+      const vFovRad = THREE.MathUtils.degToRad(this.camera.fov);
+      const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * aspect);
 
-    if (aspect < 0.85) {
-      const portraitScale = Math.max(
-        depthZoomFactor * 1.04,
-        (0.74 / Math.max(0.42, aspect)) * widthZoomFactor
-      );
-      camHeight = 30.2 * portraitScale;
-      lookZ = (worldTopZ + worldBottomZ) * 0.5 - 0.35;
-      camZ = lookZ + camHeight * 0.64;
-    } else if (aspect < 1.25) {
-      const tabletScale = Math.max(depthZoomFactor, (1.18 / aspect) * widthZoomFactor * 0.95);
-      camHeight = 34.5 * tabletScale;
-      camZ = lookZ + camHeight * 0.63;
+      const distForWidth = (totalWidthX * 0.54) / Math.tan(hFovRad / 2);
+      const distForDepth = (totalDepthZ * 0.64) / Math.tan(vFovRad / 2);
+      const camDist = Math.max(24.5, distForWidth, distForDepth);
+
+      const camHeight = camDist * 0.86;
+      const camZ = lookZ + camDist * 0.51;
+
+      this.camera.position.set(lookX, camHeight, camZ);
+      this.cameraLookTarget.set(lookX, 0, lookZ);
+    } else {
+      // Vertical Phone Layout: Z1 (Top) -> Z2 (Middle) -> Z3 (Bottom)
+      const lotBottomZ = LOT_TOP_EDGE_Z + gridH * CELL_SIZE;
+      const worldTopZ = -13.2;
+      const worldBottomZ = lotBottomZ + 2.8;
+      const totalDepthZ = worldBottomZ - worldTopZ;
+      const baselineDepthZ = 25.0;
+      const depthZoomFactor = Math.max(1.0, totalDepthZ / baselineDepthZ);
+
+      const requiredWorldWidth = Math.max(15.2, gridW * CELL_SIZE + 4.4);
+      const baselineWidth = 14.5;
+      const widthZoomFactor = Math.max(1.0, requiredWorldWidth / baselineWidth);
+
+      let lookZ = (worldTopZ + worldBottomZ) * 0.5 - 0.15;
+      let camHeight = 34.5 * Math.max(depthZoomFactor, widthZoomFactor * 0.92);
+      let camZ = lookZ + camHeight * 0.63;
+
+      if (aspect < 0.85) {
+        const portraitScale = Math.max(
+          depthZoomFactor * 1.04,
+          (0.74 / Math.max(0.42, aspect)) * widthZoomFactor
+        );
+        camHeight = 30.2 * portraitScale;
+        lookZ = (worldTopZ + worldBottomZ) * 0.5 - 0.35;
+        camZ = lookZ + camHeight * 0.64;
+      } else {
+        const tabletScale = Math.max(depthZoomFactor, (1.18 / aspect) * widthZoomFactor * 0.95);
+        camHeight = 34.5 * tabletScale;
+        camZ = lookZ + camHeight * 0.63;
+      }
+
+      this.camera.position.set(0, camHeight, camZ);
+      this.cameraLookTarget.set(0, 0, lookZ);
     }
 
-    this.camera.position.set(0, camHeight, camZ);
-    this.cameraLookTarget.set(0, 0, lookZ);
     this.camera.lookAt(this.cameraLookTarget);
     this.camera.updateProjectionMatrix();
 

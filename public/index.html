@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Bus Fever 3D: Traffic Escape</title>
+    <meta
+      name="description"
+      content="3D Bus Jam & Traffic Escape puzzle game for My PC (Samsung Smart TV Tizen 8/9, desktop, and mobile) featuring dynamic Day/Sunset/Night lighting, multi-zone textures, and full TV remote & gamepad controls."
+    />
+    <meta property="og:title" content="Bus Fever 3D: Traffic Escape" />
+    <meta
+      property="og:description"
+      content="Clear the 3D bus jam, park in angled bays, and board the looping passenger crowd!"
+    />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./css/style.css?v=1.2.0" />
+    <!-- Mandatory My PC SDK Script (Loaded BEFORE any game scripts) -->
+    <script src="https://imad-os.github.io/g/sdk/mypc-sdk.js"></script>
+  </head>
+  <body>
+    <!-- Full-Viewport 3D WebGL Canvas Mount (Zones A, B, and C) -->
+    <div id="canvas-mount" aria-label="3D Bus Jam Puzzle World"></div>
+
+    <!-- Floating 2D Capacity Badges over Parked Buses in Zone B -->
+    <div id="parked-badges-layer" aria-hidden="true"></div>
+
+    <!-- HUD Layer (Top Controls & Title + Bottom 3 Booster Cards) -->
+    <div id="hud-layer">
+      <header class="hud-top-bar">
+        <div class="hud-top-cluster">
+          <button
+            id="btn-top-home"
+            class="hud-square-btn"
+            type="button"
+            aria-label="Transit Saga Map Home"
+            title="Transit Saga Map (Home)"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6h-5v6H4a1 1 0 0 1-1-1v-9.5z"
+                stroke="#facc15"
+                stroke-width="2.4"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span id="hud-home-label" class="hud-btn-label">Map</span>
+          </button>
+
+          <button
+            id="btn-top-restart"
+            class="hud-square-btn"
+            type="button"
+            aria-label="Restart Level"
+            title="Restart Level"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M4 12a8 8 0 1 0 2.3-5.65L4 8.5M4 4v4.5h4.5"
+                stroke="#38bdf8"
+                stroke-width="2.8"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </button>
+
+          <button
+            id="btn-top-time"
+            class="hud-square-btn is-accent"
+            type="button"
+            aria-label="Cycle Time of Day"
+            title="Cycle Day / Sunset / Night"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="5" fill="#facc15" />
+              <path
+                d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12"
+                stroke="#facc15"
+                stroke-width="2.4"
+                stroke-linecap="round"
+              />
+            </svg>
+            <span id="hud-time-label" class="hud-btn-label">Night</span>
+          </button>
+        </div>
+
+        <div class="hud-center-title-wrap">
+          <h1 id="hud-level-title" class="hud-level-title">Level 1</h1>
+          <div class="hud-meta-row">
+            <span id="hud-sub-meta" class="hud-sub-meta">Queue: 0</span>
+            <span class="hud-meta-sep">·</span>
+            <span id="hud-coins-meta" class="hud-coins-meta">🪙 0 PTS</span>
+          </div>
+        </div>
+
+        <div class="hud-top-cluster">
+          <button
+            id="btn-top-music"
+            class="hud-square-btn"
+            type="button"
+            aria-label="Toggle Music"
+            title="Toggle Background Music"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M9 18V5l12-2v13"
+                stroke="#38bdf8"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <circle cx="6" cy="18" r="3" fill="#38bdf8" />
+              <circle cx="18" cy="16" r="3" fill="#38bdf8" />
+            </svg>
+            <span id="hud-music-label" class="hud-btn-label">BGM On</span>
+          </button>
+
+          <button
+            id="btn-top-pause"
+            class="hud-square-btn"
+            type="button"
+            aria-label="Pause Game"
+            title="Pause Game"
+          >
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <rect x="6.5" y="5" width="4" height="14" rx="2" fill="#f8fafc" />
+              <rect x="13.5" y="5" width="4" height="14" rx="2" fill="#f8fafc" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <div id="hud-toast" class="hud-toast" role="status" aria-live="polite">
+        Path blocked!
+      </div>
+
+      <footer class="hud-bottom-wrap">
+        <div class="hud-booster-bar">
+          <!-- Booster 1: VIP Parking Slot / Heli-Lift ([Y]) -->
+          <button
+            id="btn-booster-vip"
+            class="booster-card"
+            type="button"
+            aria-label="VIP Parking Slot Booster"
+          >
+            <span class="booster-key-hint">[Y]</span>
+            <div class="booster-floating-top">
+              <svg id="lock-booster-vip" width="44" height="44" viewBox="0 0 48 48">
+                <path
+                  d="M15 21v-5a9 9 0 0 1 18 0v5"
+                  fill="none"
+                  stroke="#d97706"
+                  stroke-width="5"
+                  stroke-linecap="round"
+                />
+                <rect x="10" y="20" width="28" height="22" rx="6" fill="#f59e0b" stroke="#b45309" stroke-width="2.5" />
+                <circle cx="24" cy="29" r="3" fill="#451a03" />
+                <path d="M24 31v5" stroke="#451a03" stroke-width="3" stroke-linecap="round" />
+              </svg>
+              <svg id="icon-booster-vip" width="44" height="44" viewBox="0 0 48 48" hidden>
+                <rect x="6" y="18" width="36" height="18" rx="6" fill="#fbbf24" stroke="#0f172a" stroke-width="2.5" />
+                <rect x="12" y="21" width="12" height="8" rx="2" fill="#0f172a" />
+                <circle cx="14" cy="37" r="4.5" fill="#090d16" />
+                <circle cx="34" cy="37" r="4.5" fill="#090d16" />
+              </svg>
+            </div>
+            <span id="badge-booster-vip" class="booster-count-badge" hidden>2</span>
+            <span id="label-booster-vip" class="booster-label">Level 5</span>
+          </button>
+
+          <!-- Booster 2: Arrange / Sort Passenger Queue ([X]) -->
+          <button
+            id="btn-booster-arrange"
+            class="booster-card"
+            type="button"
+            aria-label="Arrange Passenger Queue Booster"
+          >
+            <span class="booster-key-hint">[X]</span>
+            <div class="booster-floating-top">
+              <svg id="lock-booster-arrange" width="44" height="44" viewBox="0 0 48 48">
+                <path
+                  d="M15 21v-5a9 9 0 0 1 18 0v5"
+                  fill="none"
+                  stroke="#d97706"
+                  stroke-width="5"
+                  stroke-linecap="round"
+                />
+                <rect x="10" y="20" width="28" height="22" rx="6" fill="#f59e0b" stroke="#b45309" stroke-width="2.5" />
+                <circle cx="24" cy="29" r="3" fill="#451a03" />
+                <path d="M24 31v5" stroke="#451a03" stroke-width="3" stroke-linecap="round" />
+              </svg>
+              <svg id="icon-booster-arrange" width="44" height="44" viewBox="0 0 48 48" hidden>
+                <circle cx="16" cy="18" r="6" fill="#a855f7" stroke="#0f172a" stroke-width="2" />
+                <circle cx="32" cy="18" r="6" fill="#ff7a00" stroke="#0f172a" stroke-width="2" />
+                <circle cx="24" cy="30" r="6" fill="#22c55e" stroke="#0f172a" stroke-width="2" />
+              </svg>
+            </div>
+            <span id="badge-booster-arrange" class="booster-count-badge" hidden>2</span>
+            <span id="label-booster-arrange" class="booster-label">Level 10</span>
+          </button>
+
+          <!-- Booster 3: Jumble / Shuffle Bus Colors ([LB]) -->
+          <button
+            id="btn-booster-shuffle"
+            class="booster-card"
+            type="button"
+            aria-label="Jumble Bus Colors Booster"
+          >
+            <span class="booster-key-hint">[LB]</span>
+            <div class="booster-floating-top">
+              <svg id="lock-booster-shuffle" width="44" height="44" viewBox="0 0 48 48">
+                <path
+                  d="M15 21v-5a9 9 0 0 1 18 0v5"
+                  fill="none"
+                  stroke="#d97706"
+                  stroke-width="5"
+                  stroke-linecap="round"
+                />
+                <rect x="10" y="20" width="28" height="22" rx="6" fill="#f59e0b" stroke="#b45309" stroke-width="2.5" />
+                <circle cx="24" cy="29" r="3" fill="#451a03" />
+                <path d="M24 31v5" stroke="#451a03" stroke-width="3" stroke-linecap="round" />
+              </svg>
+              <svg id="icon-booster-shuffle" width="44" height="44" viewBox="0 0 48 48" hidden>
+                <circle cx="24" cy="24" r="16" fill="#0ea5e9" stroke="#0f172a" stroke-width="2.5" />
+                <path
+                  d="M16 20h16l-4-4M32 28H16l4 4"
+                  stroke="#f8fafc"
+                  stroke-width="3"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </div>
+            <span id="badge-booster-shuffle" class="booster-count-badge" hidden>2</span>
+            <span id="label-booster-shuffle" class="booster-label">Level 15</span>
+          </button>
+        </div>
+
+        <div id="hud-controls-strip" class="hud-controls-strip">
+          TV Remote Arrows / D-Pad: Navigate All Zones &amp; Bays · OK / [A]: Select · [Y] VIP · [X] Arrange · [LB] Jumble · [RB] Unlock Next Spot
+        </div>
+      </footer>
+    </div>
+
+    <!-- Full-Screen Home Page: Transit Saga Map (100% Dark Mode) -->
+    <div id="title-modal" class="modal-scrim modal-scrim-saga">
+      <div class="modal-card modal-card-saga" role="dialog" aria-modal="true" aria-labelledby="title-modal-heading">
+        <div class="saga-header-top">
+          <div class="saga-brand-row">
+            <svg class="title-emblem-svg" viewBox="0 0 120 120">
+              <rect x="8" y="8" width="104" height="104" rx="26" fill="#1e293b" stroke="#38bdf8" stroke-width="4" />
+              <rect x="24" y="42" width="72" height="40" rx="10" fill="#a855f7" stroke="#090d16" stroke-width="3" />
+              <rect x="30" y="48" width="24" height="16" rx="4" fill="#090d16" />
+              <rect x="60" y="48" width="28" height="14" rx="3" fill="#090d16" />
+              <circle cx="40" cy="84" r="9" fill="#090d16" />
+              <circle cx="80" cy="84" r="9" fill="#090d16" />
+              <path d="M52 28h18v-5l10 8-10 8v-5H52z" fill="#facc15" />
+            </svg>
+            <div class="saga-title-col">
+              <h2 id="title-modal-heading" class="modal-title">Bus Fever 3D: Transit Saga Map</h2>
+              <p id="title-modal-sub" class="modal-subtitle">
+                Clear stages without helpers for +3 PTS (+1 PT with helper). Spend PTS to unlock extra parking spots one by one!
+              </p>
+            </div>
+          </div>
+
+          <div class="modal-stats-row modal-stats-row-4">
+            <div class="stat-tile">
+              <span id="title-stat-lv-kicker" class="stat-tile-kicker">Unlocked</span>
+              <span id="title-stat-lv-val" class="stat-tile-val">Lv. 1</span>
+            </div>
+            <div class="stat-tile stat-tile-gold">
+              <span id="title-stat-pts-kicker" class="stat-tile-kicker">Points / Coins</span>
+              <span id="title-stat-pts-val" class="stat-tile-val stat-val-gold">🪙 0 PTS</span>
+            </div>
+            <div class="stat-tile">
+              <span id="title-stat-coins-kicker" class="stat-tile-kicker">Extra Spots</span>
+              <span id="title-stat-coins-val" class="stat-tile-val">0 / 3</span>
+            </div>
+            <div class="stat-tile">
+              <span id="title-stat-score-kicker" class="stat-tile-kicker">Best Score</span>
+              <span id="title-stat-score-val" class="stat-tile-val">0</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Full-Screen Winding Highway Transit Saga Map -->
+        <div id="title-saga-scroll" class="saga-map-viewport" aria-label="Transit Saga Level Map">
+          <div id="title-level-picker" class="saga-map-canvas"></div>
+        </div>
+
+        <div class="saga-footer-bar">
+          <button id="btn-title-play" class="btn-primary-3d btn-saga-hero" type="button">
+            🚌 Play Level 1
+          </button>
+          <div class="saga-footer-controls">
+            <button id="btn-title-unlock-bay" class="btn-secondary-3d btn-spot-unlocker" type="button">
+              🔒 Unlock Spot #1 (10 PTS)
+            </button>
+            <button id="btn-title-time" class="btn-secondary-3d" type="button">
+              Lighting: Auto
+            </button>
+            <button id="btn-title-music" class="btn-secondary-3d" type="button">
+              Music: On
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pause Modal Overlay (100% Dark Mode — Includes Home / Transit Saga Map Navigation) -->
+    <div id="pause-modal" class="modal-scrim" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pause-modal-heading">
+        <h2 id="pause-modal-heading" class="modal-title">Paused</h2>
+        <p id="pause-modal-sub" class="modal-subtitle">
+          🪙 0 PTS · Finish without helpers to earn +3 PTS!
+        </p>
+        <div class="modal-actions">
+          <button id="btn-pause-resume" class="btn-primary-3d" type="button">
+            Resume Stage
+          </button>
+          <button id="btn-pause-map" class="btn-secondary-3d btn-home-highlight" type="button">
+            🗺️ Transit Saga Map (Home Page)
+          </button>
+          <button id="btn-pause-restart" class="btn-secondary-3d" type="button">
+            Restart Stage
+          </button>
+          <button id="btn-pause-unlock-bay" class="btn-secondary-3d btn-spot-unlocker" type="button">
+            🔒 Unlock Spot #1 (10 PTS)
+          </button>
+          <div class="modal-row-2col">
+            <button id="btn-pause-time" class="btn-secondary-3d" type="button">
+              Lighting: Auto
+            </button>
+            <button id="btn-pause-music" class="btn-secondary-3d" type="button">
+              Music: On
+            </button>
+          </div>
+          <button id="btn-pause-export" class="btn-secondary-3d" type="button">
+            Export Procedural Level JSON
+          </button>
+        </div>
+        <textarea
+          id="export-json-box"
+          class="export-textarea"
+          readonly
+          hidden
+          aria-label="Exported Level JSON"
+        ></textarea>
+      </div>
+    </div>
+
+    <!-- Victory / Dock Full Modal Overlay (100% Dark Mode — Includes 1-Button Continue & Home Map) -->
+    <div id="gameover-modal" class="modal-scrim" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="gameover-modal-heading">
+        <h2 id="gameover-modal-heading" class="modal-title">Stage Clear!</h2>
+        <p id="gameover-modal-sub" class="modal-subtitle">
+          All passengers boarded and every bus escaped the traffic jam!
+        </p>
+
+        <div class="modal-stats-row">
+          <div class="stat-tile">
+            <span id="go-stat-lv-kicker" class="stat-tile-kicker">Stage</span>
+            <span id="go-stat-lv-val" class="stat-tile-val">1</span>
+          </div>
+          <div class="stat-tile stat-tile-gold">
+            <span id="go-stat-coins-kicker" class="stat-tile-kicker">Points / Coins</span>
+            <span id="go-stat-coins-val" class="stat-tile-val stat-val-gold">🪙 3 PTS</span>
+          </div>
+          <div class="stat-tile">
+            <span id="go-stat-score-kicker" class="stat-tile-kicker">Score</span>
+            <span id="go-stat-score-val" class="stat-tile-val">0</span>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="btn-gameover-next" class="btn-primary-3d" type="button">
+            Next Level
+          </button>
+          <div class="modal-row-2col">
+            <button id="btn-gameover-retry" class="btn-secondary-3d" type="button">
+              Replay Stage
+            </button>
+            <button id="btn-gameover-map" class="btn-secondary-3d btn-home-highlight" type="button">
+              🗺️ Saga Map (Home)
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./js/main.js?v=1.2.0"></script>
+  </body>
+</html>

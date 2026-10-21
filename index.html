@@ -22,7 +22,7 @@
       href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700;800;900&family=Plus+Jakarta+Sans:wght@600;700;800;900&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./css/style.css?v=1.1.0" />
+    <link rel="stylesheet" href="./css/style.css?v=1.2.0" />
     <!-- Mandatory My PC SDK Script (Loaded BEFORE any game scripts) -->
     <script src="https://imad-os.github.io/g/sdk/mypc-sdk.js"></script>
   </head>
@@ -38,13 +38,31 @@
       <header class="hud-top-bar">
         <div class="hud-top-cluster">
           <button
+            id="btn-top-home"
+            class="hud-square-btn"
+            type="button"
+            aria-label="Transit Saga Map Home"
+            title="Transit Saga Map (Home)"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6h-5v6H4a1 1 0 0 1-1-1v-9.5z"
+                stroke="#facc15"
+                stroke-width="2.4"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <span id="hud-home-label" class="hud-btn-label">Map</span>
+          </button>
+
+          <button
             id="btn-top-restart"
             class="hud-square-btn"
             type="button"
             aria-label="Restart Level"
             title="Restart Level"
           >
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
               <path
                 d="M4 12a8 8 0 1 0 2.3-5.65L4 8.5M4 4v4.5h4.5"
                 stroke="#38bdf8"
@@ -76,8 +94,13 @@
         </div>
 
         <div class="hud-center-title-wrap">
-          <h1 id="hud-level-title" class="hud-level-title">Level 1</h1>
-          <div id="hud-sub-meta" class="hud-sub-meta">Queue: 0</div>
+          <h1 id="hud-level-title" class="hud-level-title">Station 1</h1>
+          <div class="hud-meta-row">
+            <span id="hud-sub-meta" class="hud-sub-meta">Queue: 0</span>
+            <span class="hud-meta-sep">·</span>
+            <span id="hud-coins-meta" class="hud-coins-meta">🪙 0 PTS</span>
+            <span id="hud-mechanic-pill" class="hud-mechanic-pill" hidden>❓ VIP TINT</span>
+          </div>
         </div>
 
         <div class="hud-top-cluster">
@@ -224,13 +247,13 @@
         </div>
 
         <div id="hud-controls-strip" class="hud-controls-strip">
-          TV Remote Arrows / D-Pad: Navigate All Zones &amp; Bays · OK / [A]: Select · [Y] VIP · [X] Arrange · [LB] Jumble · [RB] +1 Bay
+          TV Remote Arrows / D-Pad: Navigate All Zones &amp; Bays · OK / [A]: Select · [Y] VIP · [X] Arrange · [LB] Jumble · [RB] Unlock Next Spot
         </div>
       </footer>
     </div>
 
-    <!-- Title Screen Modal Overlay: Candy Crush-Style Winding Saga Map (100% Dark Mode) -->
-    <div id="title-modal" class="modal-scrim">
+    <!-- Full-Screen Home Page: 100-Station City Transit Saga Map (100% Dark Mode) -->
+    <div id="title-modal" class="modal-scrim modal-scrim-saga">
       <div class="modal-card modal-card-saga" role="dialog" aria-modal="true" aria-labelledby="title-modal-heading">
         <div class="saga-header-top">
           <div class="saga-brand-row">
@@ -244,39 +267,65 @@
               <path d="M52 28h18v-5l10 8-10 8v-5H52z" fill="#facc15" />
             </svg>
             <div class="saga-title-col">
-              <h2 id="title-modal-heading" class="modal-title">Bus Fever 3D: Traffic Escape</h2>
+              <h2 id="title-modal-heading" class="modal-title">Bus Fever 3D: City Station Map</h2>
               <p id="title-modal-sub" class="modal-subtitle">
-                Solve each stage to unlock the next stop on the transit map! Every 10 levels unlocks +1 Parking Bay.
+                100 City Stations · 10 Progressive Mechanics (1 Every 10 Stations) · Clear without helpers for +3 PTS!
               </p>
             </div>
           </div>
 
-          <div class="modal-stats-row">
+          <div class="modal-stats-row modal-stats-row-4">
             <div class="stat-tile">
               <span id="title-stat-lv-kicker" class="stat-tile-kicker">Unlocked</span>
-              <span id="title-stat-lv-val" class="stat-tile-val">1</span>
+              <span id="title-stat-lv-val" class="stat-tile-val">Stn. 1</span>
+            </div>
+            <div class="stat-tile stat-tile-gold">
+              <span id="title-stat-pts-kicker" class="stat-tile-kicker">Points / Coins</span>
+              <span id="title-stat-pts-val" class="stat-tile-val stat-val-gold">🪙 0 PTS</span>
             </div>
             <div class="stat-tile">
-              <span id="title-stat-score-kicker" class="stat-tile-kicker">Best</span>
-              <span id="title-stat-score-val" class="stat-tile-val">0</span>
-            </div>
-            <div class="stat-tile">
-              <span id="title-stat-coins-kicker" class="stat-tile-kicker">Extra Bays</span>
+              <span id="title-stat-coins-kicker" class="stat-tile-kicker">Extra Spots</span>
               <span id="title-stat-coins-val" class="stat-tile-val">0 / 3</span>
             </div>
+            <div class="stat-tile">
+              <span id="title-stat-score-kicker" class="stat-tile-kicker">Best Score</span>
+              <span id="title-stat-score-val" class="stat-tile-val">0</span>
+            </div>
+          </div>
+
+          <!-- 5 City District Quick-Jump Tabs (Stations 1–100) -->
+          <div id="saga-district-tabs" class="saga-district-tabs" role="tablist" aria-label="City Districts">
+            <button type="button" class="saga-district-tab is-active" data-start-level="1">
+              🏙️ Stn 1–20 · Downtown
+            </button>
+            <button type="button" class="saga-district-tab" data-start-level="21">
+              🌉 Stn 21–40 · Harbor
+            </button>
+            <button type="button" class="saga-district-tab" data-start-level="41">
+              🚇 Stn 41–60 · Midtown
+            </button>
+            <button type="button" class="saga-district-tab" data-start-level="61">
+              ⚡ Stn 61–80 · Tech Park
+            </button>
+            <button type="button" class="saga-district-tab" data-start-level="81">
+              👑 Stn 81–100 · Uptown
+            </button>
           </div>
         </div>
 
-        <!-- Candy Crush-Style Winding Highway Saga Map -->
+        <!-- Full-Screen Winding City Route Transit Saga Map (Horizontal on Wide TV, Vertical on Mobile) -->
         <div id="title-saga-scroll" class="saga-map-viewport" aria-label="Transit Saga Level Map">
           <div id="title-level-picker" class="saga-map-canvas"></div>
         </div>
 
-        <div class="modal-actions">
-          <button id="btn-title-play" class="btn-primary-3d" type="button">
-            Play Stage
+        <div class="saga-footer-bar">
+          <button id="btn-title-play" class="btn-primary-3d btn-saga-hero" type="button">
+            🚌 Play Level 1
           </button>
-          <div class="modal-row-2col">
+          <div class="saga-footer-controls">
+            <button id="btn-title-unlock-bay" class="btn-secondary-3d btn-spot-unlocker" type="button">
+              🔒 Unlock Spot #1 (10 PTS)
+            </button>
             <button id="btn-title-time" class="btn-secondary-3d" type="button">
               Lighting: Auto
             </button>
@@ -288,19 +337,25 @@
       </div>
     </div>
 
-    <!-- Pause Modal Overlay (100% Dark Mode — No Level Picker) -->
+    <!-- Pause Modal Overlay (100% Dark Mode — Includes Home / Transit Saga Map Navigation) -->
     <div id="pause-modal" class="modal-scrim" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="pause-modal-heading">
         <h2 id="pause-modal-heading" class="modal-title">Paused</h2>
+        <p id="pause-modal-sub" class="modal-subtitle">
+          🪙 0 PTS · Finish without helpers to earn +3 PTS!
+        </p>
         <div class="modal-actions">
           <button id="btn-pause-resume" class="btn-primary-3d" type="button">
-            Resume
+            Resume Stage
+          </button>
+          <button id="btn-pause-map" class="btn-secondary-3d btn-home-highlight" type="button">
+            🗺️ Transit Saga Map (Home Page)
           </button>
           <button id="btn-pause-restart" class="btn-secondary-3d" type="button">
             Restart Stage
           </button>
-          <button id="btn-pause-map" class="btn-secondary-3d" type="button">
-            Transit Saga Map
+          <button id="btn-pause-unlock-bay" class="btn-secondary-3d btn-spot-unlocker" type="button">
+            🔒 Unlock Spot #1 (10 PTS)
           </button>
           <div class="modal-row-2col">
             <button id="btn-pause-time" class="btn-secondary-3d" type="button">
@@ -310,9 +365,6 @@
               Music: On
             </button>
           </div>
-          <button id="btn-pause-unlock-bay" class="btn-secondary-3d" type="button">
-            +1 Parking Bay (Lv.10)
-          </button>
           <button id="btn-pause-export" class="btn-secondary-3d" type="button">
             Export Procedural Level JSON
           </button>
@@ -327,7 +379,7 @@
       </div>
     </div>
 
-    <!-- Victory / Dock Full Modal Overlay (100% Dark Mode) -->
+    <!-- Victory / Dock Full Modal Overlay (100% Dark Mode — Includes 1-Button Continue & Home Map) -->
     <div id="gameover-modal" class="modal-scrim" hidden>
       <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="gameover-modal-heading">
         <h2 id="gameover-modal-heading" class="modal-title">Stage Clear!</h2>
@@ -340,13 +392,13 @@
             <span id="go-stat-lv-kicker" class="stat-tile-kicker">Stage</span>
             <span id="go-stat-lv-val" class="stat-tile-val">1</span>
           </div>
+          <div class="stat-tile stat-tile-gold">
+            <span id="go-stat-coins-kicker" class="stat-tile-kicker">Points / Coins</span>
+            <span id="go-stat-coins-val" class="stat-tile-val stat-val-gold">🪙 3 PTS</span>
+          </div>
           <div class="stat-tile">
             <span id="go-stat-score-kicker" class="stat-tile-kicker">Score</span>
             <span id="go-stat-score-val" class="stat-tile-val">0</span>
-          </div>
-          <div class="stat-tile">
-            <span id="go-stat-coins-kicker" class="stat-tile-kicker">Coins</span>
-            <span id="go-stat-coins-val" class="stat-tile-val">200</span>
           </div>
         </div>
 
@@ -354,13 +406,18 @@
           <button id="btn-gameover-next" class="btn-primary-3d" type="button">
             Next Level
           </button>
-          <button id="btn-gameover-retry" class="btn-secondary-3d" type="button">
-            Replay Stage
-          </button>
+          <div class="modal-row-2col">
+            <button id="btn-gameover-retry" class="btn-secondary-3d" type="button">
+              Replay Stage
+            </button>
+            <button id="btn-gameover-map" class="btn-secondary-3d btn-home-highlight" type="button">
+              🗺️ Saga Map (Home)
+            </button>
+          </div>
         </div>
       </div>
     </div>
 
-    <script type="module" src="./js/main.js?v=1.1.0"></script>
+    <script type="module" src="./js/main.js?v=1.2.0"></script>
   </body>
 </html>

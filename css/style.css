@@ -161,10 +161,29 @@ body {
   text-shadow: 0 3px 0 #020617;
 }
 
+.hud-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .hud-sub-meta {
   font-size: 12px;
   font-weight: 800;
   color: #38bdf8;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-meta-sep {
+  font-size: 12px;
+  font-weight: 900;
+  color: #64748b;
+}
+
+.hud-coins-meta {
+  font-size: 12px;
+  font-weight: 900;
+  color: #facc15;
   font-variant-numeric: tabular-nums;
 }
 
@@ -319,41 +338,50 @@ body {
   transform: scale(1.06) !important;
 }
 
-/* Full-Viewport Dark-Mode Modal Scrims (Title, Pause, Victory / Game Over) */
+/* Full-Viewport Dark-Mode Modal Scrims (Title Saga Home, Pause, Victory / Game Over) */
 .modal-scrim {
   position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(5, 8, 15, 0.78);
+  background-color: rgba(5, 8, 15, 0.84);
   z-index: 30;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 16px;
+}
+
+.modal-scrim-saga {
+  background-color: rgba(6, 10, 19, 0.92);
+  padding: 12px;
 }
 
 .modal-card {
   width: 100%;
-  max-width: 480px;
+  max-width: 490px;
   background-color: #0f172a;
   border: 3px solid #334155;
   border-radius: 26px;
-  box-shadow: 0 24px 55px rgba(2, 6, 23, 0.88), 0 0 0 1px rgba(56, 189, 248, 0.15);
-  padding: 24px 22px;
+  box-shadow: 0 24px 55px rgba(2, 6, 23, 0.9), 0 0 0 1px rgba(56, 189, 248, 0.18);
+  padding: 22px 22px;
   display: flex;
   flex-direction: column;
   align-items: center;
   text-align: center;
-  gap: 14px;
+  gap: 13px;
 }
 
+/* Full-Screen Transit Saga Map Home Page Card */
 .modal-card-saga {
-  max-width: 540px;
-  max-height: 92vh;
-  padding: 20px 20px;
+  width: 96vw;
+  max-width: 1080px;
+  height: 92vh;
+  max-height: 94vh;
+  padding: 18px 22px;
   gap: 12px;
+  justify-content: space-between;
 }
 
 .saga-header-top {
@@ -361,6 +389,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .saga-brand-row {
@@ -377,13 +406,13 @@ body {
 }
 
 .title-emblem-svg {
-  width: 64px;
-  height: 64px;
+  width: 56px;
+  height: 56px;
   flex-shrink: 0;
 }
 
 .modal-title {
-  font-size: clamp(22px, 3.2vw, 28px);
+  font-size: clamp(20px, 2.8vw, 28px);
   font-weight: 900;
   color: #f8fafc;
   letter-spacing: -0.02em;
@@ -404,14 +433,23 @@ body {
   width: 100%;
 }
 
+.modal-stats-row-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
 .stat-tile {
   background-color: #1e293b;
   border: 1.5px solid #334155;
   border-radius: 14px;
-  padding: 8px 8px;
+  padding: 7px 10px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.stat-tile-gold {
+  background-color: #271e0b;
+  border-color: #d97706;
 }
 
 .stat-tile-kicker {
@@ -423,30 +461,37 @@ body {
 }
 
 .stat-tile-val {
-  font-size: 19px;
+  font-size: clamp(16px, 2vw, 20px);
   font-weight: 900;
   color: #38bdf8;
   font-variant-numeric: tabular-nums;
 }
 
-/* Candy Crush-Style Winding Highway Saga Map */
+.stat-val-gold {
+  color: #facc15;
+}
+
+/* Redesigned Large Full-Screen Winding Highway Saga Map */
 .saga-map-viewport {
   width: 100%;
-  height: clamp(220px, 36vh, 320px);
+  flex: 1;
+  min-height: 260px;
   overflow-y: auto;
   overflow-x: hidden;
-  border-radius: 20px;
-  border: 2.5px solid #1e293b;
-  background-color: #090d16;
-  background-image: radial-gradient(circle at 20% 30%, rgba(56, 189, 248, 0.09), transparent 45%),
-    radial-gradient(circle at 80% 70%, rgba(168, 85, 247, 0.09), transparent 45%);
-  box-shadow: inset 0 6px 18px rgba(2, 6, 23, 0.85);
+  border-radius: 22px;
+  border: 2.5px solid #334155;
+  background-color: #080d18;
+  background-image:
+    radial-gradient(circle at 18% 25%, rgba(56, 189, 248, 0.14), transparent 42%),
+    radial-gradient(circle at 82% 65%, rgba(168, 85, 247, 0.14), transparent 42%),
+    radial-gradient(circle at 50% 85%, rgba(34, 197, 94, 0.1), transparent 45%);
+  box-shadow: inset 0 8px 26px rgba(2, 6, 23, 0.92);
   position: relative;
   scroll-behavior: smooth;
 }
 
 .saga-map-viewport::-webkit-scrollbar {
-  width: 8px;
+  width: 10px;
 }
 
 .saga-map-viewport::-webkit-scrollbar-track {
@@ -455,12 +500,14 @@ body {
 
 .saga-map-viewport::-webkit-scrollbar-thumb {
   background: #334155;
-  border-radius: 4px;
+  border-radius: 5px;
 }
 
 .saga-map-canvas {
   position: relative;
   width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
 }
 
 .saga-path-svg {
@@ -473,20 +520,23 @@ body {
   z-index: 1;
 }
 
-.saga-zone-badge {
+.saga-zone-badge,
+.saga-district-banner {
   position: absolute;
+  left: 50%;
   transform: translate(-50%, -50%);
-  background-color: rgba(15, 23, 42, 0.92);
-  border: 1.5px solid #334155;
-  color: #94a3b8;
-  font-size: 10px;
-  font-weight: 800;
-  padding: 3px 10px;
-  border-radius: 10px;
+  background-color: rgba(15, 23, 42, 0.96);
+  border: 2px solid #38bdf8;
+  color: #e0f2fe;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 4px 14px;
+  border-radius: 12px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  box-shadow: 0 6px 16px rgba(2, 6, 23, 0.85);
   pointer-events: none;
-  z-index: 2;
+  z-index: 3;
   white-space: nowrap;
 }
 
@@ -496,11 +546,11 @@ body {
   background-color: #422006;
   border: 2px solid #facc15;
   color: #fef08a;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
-  padding: 3px 9px;
-  border-radius: 10px;
-  box-shadow: 0 4px 10px rgba(2, 6, 23, 0.8);
+  padding: 4px 11px;
+  border-radius: 11px;
+  box-shadow: 0 5px 14px rgba(2, 6, 23, 0.85);
   pointer-events: none;
   z-index: 3;
   white-space: nowrap;
@@ -516,12 +566,12 @@ body {
   pointer-events: auto;
   position: absolute;
   transform: translate(-50%, -50%);
-  width: 58px;
-  height: 58px;
+  width: 68px;
+  height: 68px;
   border-radius: 50%;
-  border: 3px solid #334155;
+  border: 3.5px solid #334155;
   background-color: #1e293b;
-  box-shadow: 0 6px 0 #020617, 0 8px 18px rgba(2, 6, 23, 0.8);
+  box-shadow: 0 7px 0 #020617, 0 10px 22px rgba(2, 6, 23, 0.85);
   color: #f8fafc;
   font-family: inherit;
   display: flex;
@@ -536,56 +586,55 @@ body {
 .saga-node-btn.is-completed {
   background-color: #0284c7;
   border-color: #7dd3fc;
-  box-shadow: 0 6px 0 #0c4a6e, 0 8px 18px rgba(2, 132, 199, 0.42);
+  box-shadow: 0 7px 0 #0c4a6e, 0 10px 22px rgba(2, 132, 199, 0.45);
 }
 
 .saga-node-btn.is-frontier {
-  width: 66px;
-  height: 66px;
+  width: 78px;
+  height: 78px;
   background-color: #16a34a;
   border-color: #fde047;
-  box-shadow: 0 6px 0 #14532d, 0 0 0 5px rgba(250, 204, 21, 0.32), 0 10px 24px rgba(22, 163, 74, 0.55);
+  box-shadow: 0 7px 0 #14532d, 0 0 0 6px rgba(250, 204, 21, 0.35), 0 12px 28px rgba(22, 163, 74, 0.6);
 }
 
 .saga-node-btn.is-selected {
-  outline: 3.5px solid #38bdf8;
+  outline: 4px solid #38bdf8;
   outline-offset: 3px;
 }
 
 .saga-node-btn.is-locked {
   background-color: #131c2e;
-  border-color: #26334d;
-  color: #64748b;
-  box-shadow: 0 5px 0 #050811;
-  opacity: 0.88;
+  border-color: #2c3b59;
+  color: #94a3b8;
+  box-shadow: 0 6px 0 #050811, 0 6px 14px rgba(2, 6, 23, 0.75);
 }
 
 .saga-node-btn:hover {
-  transform: translate(-50%, -54%) scale(1.06);
+  transform: translate(-50%, -54%) scale(1.07);
 }
 
 .saga-node-btn.tv-focused {
   outline: 4px solid #facc15 !important;
   outline-offset: 4px !important;
   border-color: #facc15 !important;
-  transform: translate(-50%, -50%) scale(1.14) !important;
+  transform: translate(-50%, -50%) scale(1.15) !important;
   z-index: 8;
 }
 
 .saga-node-num {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   line-height: 1;
-  text-shadow: 0 2px 0 rgba(2, 6, 23, 0.85);
+  text-shadow: 0 2px 0 rgba(2, 6, 23, 0.9);
 }
 
 .saga-node-stars {
   position: absolute;
-  top: -15px;
+  top: -17px;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 12px;
+  font-size: 13px;
   color: #facc15;
   letter-spacing: 1px;
   text-shadow: 0 2px 4px #020617;
@@ -595,25 +644,163 @@ body {
 
 .saga-node-bus-pin {
   position: absolute;
-  top: -24px;
+  top: -28px;
   left: 50%;
   transform: translateX(-50%);
   background-color: #facc15;
   color: #090d16;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 900;
-  padding: 2px 7px;
-  border-radius: 8px;
+  padding: 2px 9px;
+  border-radius: 9px;
   border: 2px solid #090d16;
-  box-shadow: 0 3px 8px rgba(2, 6, 23, 0.75);
+  box-shadow: 0 4px 10px rgba(2, 6, 23, 0.8);
   white-space: nowrap;
   pointer-events: none;
 }
 
+.saga-node-stn-kicker {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #bae6fd;
+  line-height: 1;
+  margin-bottom: 1px;
+}
+
+.saga-node-btn.is-locked .saga-node-stn-kicker {
+  color: #64748b;
+}
+
+.saga-node-mech-badge {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #3b0764;
+  border: 1.5px solid #c084fc;
+  color: #f3e8ff;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(2, 6, 23, 0.88);
+  pointer-events: none;
+}
+
+.saga-node-mech-badge.is-debut {
+  background-color: #422006;
+  border-color: #facc15;
+  color: #fef08a;
+}
+
 .saga-node-lock-svg {
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+}
+
+/* 5 City District Quick-Jump Tabs (Stations 1–100) */
+.saga-district-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  width: 100%;
+}
+
+.saga-district-tab {
+  pointer-events: auto;
+  padding: 7px 8px;
+  border-radius: 12px;
+  border: 2px solid #334155;
+  background-color: #131c2e;
+  color: #94a3b8;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.14s ease;
+}
+
+.saga-district-tab:hover {
+  border-color: #38bdf8;
+  color: #f8fafc;
+}
+
+.saga-district-tab.is-active {
+  background-color: #0284c7;
+  border-color: #7dd3fc;
+  color: #f8fafc;
+  box-shadow: 0 3px 0 #0c4a6e;
+}
+
+/* Wide TV Mode Horizontal Winding City Route Saga Map */
+.saga-map-viewport.is-wide-horizontal {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.saga-map-viewport.is-wide-horizontal::-webkit-scrollbar {
+  height: 11px;
+}
+
+.saga-map-canvas.is-wide-horizontal {
+  max-width: none;
+  height: 100%;
+  min-height: 320px;
+  margin: 0;
+}
+
+/* HUD Mechanic Pill & 3D Floating Mechanic Badge */
+.hud-mechanic-pill {
+  background-color: #3b0764;
+  border: 1.5px solid #c084fc;
+  color: #f3e8ff;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 2px 9px;
+  border-radius: 9px;
+  letter-spacing: 0.03em;
+  margin-left: 4px;
+  box-shadow: 0 3px 8px rgba(2, 6, 23, 0.7);
+}
+
+.grid-mechanic-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background-color: rgba(15, 23, 42, 0.94);
+  border: 2px solid #facc15;
+  color: #fef08a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  box-shadow: 0 5px 14px rgba(2, 6, 23, 0.88);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 6;
+}
+
+.saga-footer-bar {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex-shrink: 0;
+}
+
+.saga-footer-controls {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 10px;
+  width: 100%;
 }
 
 .modal-actions {
@@ -659,7 +846,7 @@ body {
 .btn-secondary-3d {
   pointer-events: auto;
   width: 100%;
-  padding: 10px 16px;
+  padding: 10px 14px;
   border-radius: 14px;
   border: 2px solid #334155;
   background-color: #1e293b;
@@ -677,10 +864,28 @@ body {
   color: #f8fafc;
 }
 
+.btn-home-highlight {
+  background-color: #172554;
+  border-color: #38bdf8;
+  color: #e0f2fe;
+}
+
+.btn-spot-unlocker {
+  background-color: #271e0b;
+  border-color: #f59e0b;
+  color: #fef08a;
+}
+
+.btn-spot-unlocker.is-ready-spot {
+  background-color: #064e3b;
+  border-color: #4ade80;
+  color: #bbf7d0;
+}
+
 .btn-secondary-3d.is-disabled-milestone {
-  opacity: 0.65;
+  opacity: 0.72;
   color: #94a3b8;
-  border-color: #1e293b;
+  border-color: #334155;
 }
 
 .export-textarea {
@@ -722,5 +927,23 @@ body {
 
   .hud-controls-strip {
     display: none;
+  }
+
+  .modal-stats-row-4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .saga-district-tabs {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .saga-footer-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .modal-card-saga {
+    width: 98vw;
+    height: 95vh;
+    padding: 14px 14px;
   }
 }

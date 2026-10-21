@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for Bus Fever 3D: Traffic Escape covering Dynamic Day/Sunset/Night Lighting, Open-Source CC0 Multi-Zone Surface Textures (Asphalt, Cobblestone Plaza, Tiled Walkway, Landscaped Turf), Dark-Mode Menus & HUD (Zero White Backgrounds), Open-Source SFX + Toggleable Background Music Loop, and Full TV Remote & 4-Controller Gamepad Spatial Navigation.",
-  "updatedAt":  "2026-10-21T12:15:27.351613676Z",
+  "summary":  "Implementation plan for the 100-Station City Route Saga Map (TV horizontal & mobile vertical), 10 progressive gameplay mechanics (1 introduced every 10 levels, max 1 per level), 4 detailed 3D vehicle types (Taxi 3, Minibus 15, Bus 25, Double Bus 40), 3D overhead flipped selection arrow, and strict Door-Gate-only passenger boarding with a high-contrast door ground pad.",
+  "updatedAt":  "2026-10-21T16:03:34.664143245Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

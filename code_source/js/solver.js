@@ -67,7 +67,13 @@ export function getBusMeshDimensions(length) {
  * centerX = hx - ((L - 1) * dx) / 2
  * centerZ = hz - ((L - 1) * dz) / 2
  */
-export function getBusWorldCenter(bus, gridWidth, gridHeight, gridOriginZ = 4.2) {
+export function getBusWorldCenter(
+  bus,
+  gridWidth,
+  gridHeight,
+  gridOriginZ = 4.2,
+  gridOriginX = 0
+) {
   const vec = DIR_VECTORS[bus.dir] || DIR_VECTORS.N;
   const L = bus.length || (bus.type === 'coach' ? 3 : 2);
   const hx = bus.hx !== undefined ? bus.hx : bus.anchorX;
@@ -82,7 +88,7 @@ export function getBusWorldCenter(bus, gridWidth, gridHeight, gridOriginZ = 4.2)
   return {
     gridCenterX,
     gridCenterZ,
-    worldX: gridCenterX * CELL_SIZE - offsetX,
+    worldX: gridOriginX + (gridCenterX * CELL_SIZE - offsetX),
     worldZ: gridOriginZ + (gridCenterZ * CELL_SIZE - offsetZ),
     rotY: vec.rotY + (bus.lotAngle || 0),
   };
@@ -203,16 +209,19 @@ export function sanitizeStage(rawStage) {
   fixMutualCycles(sanitizedBuses, gridWidth, gridHeight);
 
   // Reconcile passengerQueue so exact seat counts per color match 100%
+  // and chunking scales progressively with stage level
+  const stageLevel = rawStage.level || 1;
   const passengerQueue = buildBalancedPassengerQueue(
     sanitizedBuses,
     rawStage.passengerQueue,
     gridWidth,
-    gridHeight
+    gridHeight,
+    stageLevel
   );
 
   return {
-    level: rawStage.level || 1,
-    title: rawStage.title || `Level ${rawStage.level || 1}`,
+    level: stageLevel,
+    title: rawStage.title || `Level ${stageLevel}`,
     difficulty: rawStage.difficulty || 'medium',
     grid: { width: gridWidth, height: gridHeight },
     dockSlots: rawStage.dockSlots || 4,
@@ -308,10 +317,19 @@ export function fixMutualCycles(buses, gridWidth, gridHeight) {
 
 /**
  * Simulates peeling the buses and builds a passengerQueue in solvable wave order
- * so that total passenger colors match total bus capacities 100%, and early-unblocked
- * buses match the front waves of passengers.
+ * with progressive color chunking based on levelNumber:
+ * - Levels 1–4: Clean, contiguous single-color chunks (e.g. chunk of pink -> chunk of red -> chunk of green)
+ *   Also prefers peeling same-color unblocked buses consecutively so early levels have super-clean color blocks.
+ * - Levels 5–9: Medium color chunks (chunkSize = 3..4) interleaved between pairs of solvable buses.
+ * - Levels 10+: Finer color chunks (chunkSize = 2, then 1) interleaved within 2–3 bus waves for higher challenge.
  */
-export function buildBalancedPassengerQueue(buses, existingQueue, gridWidth, gridHeight) {
+export function buildBalancedPassengerQueue(
+  buses,
+  existingQueue,
+  gridWidth,
+  gridHeight,
+  levelNumber = 1
+) {
   // Calculate exact required seats per color
   const requiredByColor = {};
   let totalRequired = 0;
@@ -340,22 +358,72 @@ export function buildBalancedPassengerQueue(buses, existingQueue, gridWidth, gri
     }
   }
 
-  // Otherwise generate waves ordered by the natural peel order of the buses
+  // Simulate peeling buses in solvable order.
+  // For low levels (<= 5), if an unblocked bus matches the last peeled color, pick it next to form larger contiguous color blocks!
   const remaining = buses.map((b) => ({ ...b }));
-  const queue = [];
+  const peeledBuses = [];
+  let lastColor = null;
 
   while (remaining.length > 0) {
-    // Find all currently unblocked buses
-    const unblocked = [];
+    const unblockedIndices = [];
     for (let i = 0; i < remaining.length; i++) {
       if (!findBlockingBus(remaining[i], remaining, gridWidth, gridHeight)) {
-        unblocked.push(i);
+        unblockedIndices.push(i);
       }
     }
-    const pickIdx = unblocked.length > 0 ? unblocked[0] : 0;
+
+    let pickIdx = unblockedIndices.length > 0 ? unblockedIndices[0] : 0;
+    if (levelNumber <= 5 && lastColor && unblockedIndices.length > 1) {
+      const sameColorIdx = unblockedIndices.find((idx) => remaining[idx].color === lastColor);
+      if (sameColorIdx !== undefined) {
+        pickIdx = sameColorIdx;
+      }
+    }
+
     const picked = remaining.splice(pickIdx, 1)[0];
-    for (let c = 0; c < picked.capacity; c++) {
-      queue.push(picked.color);
+    lastColor = picked.color;
+    peeledBuses.push(picked);
+  }
+
+  const lvl = Math.max(1, Math.floor(levelNumber || 1));
+
+  // Levels 1 to 4: 100% pure contiguous chunks per bus (zero interleaving)
+  if (lvl <= 4) {
+    const pureQueue = [];
+    for (let i = 0; i < peeledBuses.length; i++) {
+      const bus = peeledBuses[i];
+      for (let c = 0; c < bus.capacity; c++) {
+        pureQueue.push(bus.color);
+      }
+    }
+    return pureQueue;
+  }
+
+  // Levels 5+: Progressive chunked interleaving within small solvable waves (2 buses for Lv 5..11, 3 buses for Lv 12+)
+  // Since the player has 4+ parking bays, interleaving 2–3 solvable buses in chunks is always 100% solvable.
+  const waveBusCount = lvl <= 11 ? 2 : 3;
+  const chunkSize = lvl <= 7 ? 4 : lvl <= 11 ? 3 : lvl <= 16 ? 2 : 1;
+
+  const queue = [];
+  for (let w = 0; w < peeledBuses.length; w += waveBusCount) {
+    const wave = peeledBuses.slice(w, w + waveBusCount).map((b) => ({
+      color: b.color,
+      remaining: b.capacity,
+    }));
+
+    let anyLeft = true;
+    while (anyLeft) {
+      anyLeft = false;
+      for (let i = 0; i < wave.length; i++) {
+        if (wave[i].remaining > 0) {
+          const take = Math.min(chunkSize, wave[i].remaining);
+          for (let k = 0; k < take; k++) {
+            queue.push(wave[i].color);
+          }
+          wave[i].remaining -= take;
+          if (wave[i].remaining > 0) anyLeft = true;
+        }
+      }
     }
   }
 
@@ -403,10 +471,6 @@ export function generateSolvableStage(levelNumber, customSeed) {
   const placedBuses = [];
   const dirs = ['N', 'S', 'E', 'W'];
 
-  // We build in reverse peel order:
-  // First placed buses are the LAST to leave; later placed buses must be unblocked when earlier ones leave.
-  // Even simpler and stronger: place non-overlapping buses, then orient each bus along a direction that is free
-  // relative to already-locked "inner" buses!
   for (let bIdx = 0; bIdx < targetBusCount * 4 && placedBuses.length < targetBusCount; bIdx++) {
     const isCoach = rng() < Math.min(0.45, 0.12 + levelNumber * 0.02);
     const isMinivan = !isCoach && rng() < 0.35;
@@ -417,7 +481,6 @@ export function generateSolvableStage(levelNumber, customSeed) {
 
     // Shuffle candidate grid cells and directions
     const dirOrder = dirs.slice().sort(() => rng() - 0.5);
-    // Bias 'N' slightly so many buses face the road like in classic levels
     if (rng() < 0.45) {
       dirOrder.unshift('N');
     }
@@ -451,8 +514,6 @@ export function generateSolvableStage(levelNumber, customSeed) {
         }
         if (overlap) continue;
 
-        // Verify this candidate is NOT blocked by any already-placed bus
-        // (Since already-placed buses will leave AFTER this candidate in reverse-peel order!)
         const blocker = findBlockingBus(candidate, placedBuses, gridWidth, gridHeight);
         if (!blocker) {
           chosen = candidate;
@@ -470,16 +531,6 @@ export function generateSolvableStage(levelNumber, customSeed) {
     }
   }
 
-  // Build passenger waves following the peel order (which is reverse of placedBuses!)
-  const peelOrder = placedBuses.slice().reverse();
-  const passengerQueue = [];
-  for (let i = 0; i < peelOrder.length; i++) {
-    const bus = peelOrder[i];
-    for (let c = 0; c < bus.capacity; c++) {
-      passengerQueue.push(bus.color);
-    }
-  }
-
   const difficultyNames = ['Easy', 'Normal', 'Medium', 'Hard', 'Expert'];
   const difficulty =
     levelNumber % 5 === 0
@@ -493,6 +544,5 @@ export function generateSolvableStage(levelNumber, customSeed) {
     grid: { width: gridWidth, height: gridHeight },
     dockSlots: 4,
     buses: placedBuses,
-    passengerQueue,
   });
 }
