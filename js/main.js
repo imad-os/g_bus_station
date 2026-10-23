@@ -9,6 +9,7 @@ import {
   areBusesAdjacent,
   STAGE_MECHANICS,
   selectMechanicForLevel,
+  getCircleActiveQueueLimit,
 } from './solver.js';
 import { LevelManager } from './levelManager.js';
 import { Renderer3D, getDynamicGridOriginZ, getDynamicGridOriginX } from './renderer3d.js';
@@ -1458,25 +1459,38 @@ export class BusFeverGame {
     let anyMatchingColorInQueue = false;
 
     if (this.passengerQueue.length > 0) {
-      // Check if ANY passenger in the revolving circle or line matches a parked vehicle
-      // (so the deadlock timer never fires while matching passengers are walking around the circle toward the Door Ground Pad)
+      const currentStageLevel = this.stage?.level || this.saveData.currentLevel || 1;
+      const maxLoopPassengers = (this.renderer3d.loopCapacityRows || 18) * 5;
+      const circleLimit = getCircleActiveQueueLimit(
+        this.passengerQueue,
+        maxLoopPassengers,
+        3
+      );
+      const activeCircleColors = new Set(
+        this.passengerQueue.slice(0, circleLimit)
+      );
+
+      // Check if any parked vehicle matches the <= 3 colors currently turning inside the Revolving Circle
+      // (so the deadlock timer fires when all bays are full of Feeder-Line colors not in the circle!)
       for (let i = 0; i < this.dockSlots.length; i++) {
         const slot = this.dockSlots[i];
         if (!slot.busId) continue;
         const actor = this.renderer3d.busActors.get(slot.busId);
         if (actor && actor.state === 'parked' && actor.remainingCapacity > 0) {
-          if (this.passengerQueue.includes(actor.data.color)) {
+          if (activeCircleColors.has(actor.data.color)) {
             anyMatchingColorInQueue = true;
             break;
           }
         }
       }
 
-      // STRICT DOOR-GATE BOARDING:
-      // Passengers walking in the revolving circle can ONLY board a parked vehicle
-      // when their row reaches the high-contrast Boarding Door Ground Pad (uLoop near 0).
+      // STRICT REVOLVING CIRCLE DOOR BOARDING (MAX 3 COLORS PER CIRCLE):
+      // Passengers walking inside the Revolving Circle (<= 3 contiguous color chunks)
+      // board a matching parked vehicle when their row steps across the Boarding Door Ground Pad (uLoop near 0).
       const candidateIndices = this.renderer3d.getDoorGateEligibleIndices(
-        this.passengerQueue.length
+        this.passengerQueue.length,
+        this.passengerQueue,
+        currentStageLevel
       );
 
       let matchQueueIdx = -1;
@@ -1511,9 +1525,70 @@ export class BusFeverGame {
         if (this.boardingCooldown <= 0) {
           // Fast boarding cadence so 25-seat buses and 40-seat double-deckers board smoothly at the Door Pad
           this.boardingCooldown = 0.052;
+          const targetChunkColor = this.passengerQueue[matchQueueIdx];
+          const prevSame =
+            matchQueueIdx > 0 &&
+            this.passengerQueue[matchQueueIdx - 1] === targetChunkColor;
+          const nextSame =
+            matchQueueIdx + 1 < this.passengerQueue.length &&
+            this.passengerQueue[matchQueueIdx + 1] === targetChunkColor;
+          const wasLastOfContiguousChunk = !prevSame && !nextSame;
+
           const [boardedColor] = this.passengerQueue.splice(matchQueueIdx, 1);
           matchingActor.remainingCapacity = Math.max(0, matchingActor.remainingCapacity - 1);
           matchingActor.boardedCount++;
+
+          // When an entire giant color chunk in the Revolving Circle finishes (0 remaining in that chunk),
+          // the 3rd color slot in the circle opens up for the Feeder Line! If a parked blocker vehicle in
+          // a bay has its contiguous color chunk waiting in the Feeder Line, slide that chunk to the front
+          // of the Feeder Line so it walks straight into the newly opened 3rd circle slot!
+          if (wasLastOfContiguousChunk && this.passengerQueue.length > 0) {
+            const twoChunkLimit = getCircleActiveQueueLimit(
+              this.passengerQueue,
+              maxLoopPassengers,
+              2
+            );
+            if (twoChunkLimit < this.passengerQueue.length) {
+              const parkedWaitingColors = new Set();
+              for (let i = 0; i < this.dockSlots.length; i++) {
+                const s = this.dockSlots[i];
+                if (!s.busId) continue;
+                const act = this.renderer3d.busActors.get(s.busId);
+                if (act && act.state === 'parked' && act.remainingCapacity > 0) {
+                  parkedWaitingColors.add(act.data.color);
+                }
+              }
+              const frontFeederColor = this.passengerQueue[twoChunkLimit];
+              if (
+                parkedWaitingColors.size > 0 &&
+                !parkedWaitingColors.has(frontFeederColor)
+              ) {
+                let promoStart = -1;
+                let promoEnd = -1;
+                for (let idx = twoChunkLimit; idx < this.passengerQueue.length; idx++) {
+                  const col = this.passengerQueue[idx];
+                  if (parkedWaitingColors.has(col)) {
+                    promoStart = idx;
+                    promoEnd = idx + 1;
+                    while (
+                      promoEnd < this.passengerQueue.length &&
+                      this.passengerQueue[promoEnd] === col
+                    ) {
+                      promoEnd++;
+                    }
+                    break;
+                  }
+                }
+                if (promoStart > twoChunkLimit) {
+                  const promotedChunk = this.passengerQueue.splice(
+                    promoStart,
+                    promoEnd - promoStart
+                  );
+                  this.passengerQueue.splice(twoChunkLimit, 0, ...promotedChunk);
+                }
+              }
+            }
+          }
 
           // Mechanic 9: Dual-Color Coach switches from Front Color to Rear Color halfway through boarding
           const mState = matchingActor.data.mechanicState;

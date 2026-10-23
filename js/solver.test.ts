@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   CELL_SIZE,
+  COLORS_PALETTE,
   getBusCells,
   getBusMeshDimensions,
   getBusWorldCenter,
@@ -10,6 +11,7 @@ import {
   sanitizeStage,
   findBlockingBus,
   generateSolvableStage,
+  getCircleActiveQueueLimit,
 } from './solver.js';
 import { EMBEDDED_PACK_01, LevelManager } from './levelManager.js';
 
@@ -150,6 +152,43 @@ test('Zone C dynamic grid origin guarantees strict separation from Zone B parkin
       assert.ok(
         busTopEdgeZ - ROAD_BOTTOM_EDGE_Z >= 2.5,
         `Level ${lvl} bus ${bus.id} must maintain >= 2.5 world units separation from Zone B parking bays`
+      );
+    }
+  }
+});
+
+test('Level 4+ difficulty ramp enforces 10-color palette, <= 3 big color chunks per circle, and buries circle colors behind blockers', () => {
+  assert.equal(COLORS_PALETTE.length, 10, 'Palette should contain 10 distinct colors');
+  assert.ok(COLORS_PALETTE.includes('white') && COLORS_PALETTE.includes('bronze'));
+
+  const manager = new LevelManager();
+  for (let lvl = 4; lvl <= 40; lvl++) {
+    const stage = manager.getStage(lvl);
+    assert.ok(
+      stage.buses.length >= 12 && stage.buses.length <= 24,
+      `Level ${lvl} should have 12..24 dense vehicles (got ${stage.buses.length})`
+    );
+
+    const circleLimit = getCircleActiveQueueLimit(stage.passengerQueue, 90, 3);
+    const circleSlice = stage.passengerQueue.slice(0, circleLimit);
+    const circleColors = Array.from(new Set(circleSlice));
+
+    assert.ok(
+      circleColors.length >= 1 && circleColors.length <= 3,
+      `Level ${lvl} Revolving Circle must never contain more than 3 colors (got ${circleColors.length})`
+    );
+
+    // Every color turning in the Revolving Circle at stage start must be buried behind blockers!
+    for (const cColor of circleColors) {
+      const unblockedMatching = stage.buses.filter(
+        (b: any) =>
+          b.color === cColor &&
+          !findBlockingBus(b, stage.buses, stage.grid.width, stage.grid.height)
+      );
+      assert.equal(
+        unblockedMatching.length,
+        0,
+        `Level ${lvl} initial circle color (${cColor}) must be buried behind blockers at stage start`
       );
     }
   }

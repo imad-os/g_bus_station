@@ -21,7 +21,48 @@ export const COLORS_PALETTE = [
   'cyan',
   'red',
   'blue',
+  'white',
+  'bronze',
 ];
+
+/**
+ * Computes how many passengers from the front of `passengerQueue` (`0 .. limit - 1`)
+ * are currently turning inside the Revolving Circle.
+ * Enforces two strict bounds:
+ * 1. Physical circle capacity (`maxLoopPassengers`, e.g. 18 rows * 5 = 90 passengers)
+ * 2. Hard color-chunk limit: NEVER more than `maxColorRuns` (3) contiguous color chunks
+ *    (and at most 3 distinct colors) inside the circle at the same time!
+ */
+export function getCircleActiveQueueLimit(
+  passengerQueue,
+  maxLoopPassengers = 90,
+  maxColorRuns = 3
+) {
+  if (!Array.isArray(passengerQueue) || passengerQueue.length === 0) return 0;
+  const maxScan = Math.min(passengerQueue.length, maxLoopPassengers);
+  let runCount = 0;
+  let lastColor = null;
+  const distinctColors = new Set();
+  let limit = 0;
+
+  for (let i = 0; i < maxScan; i++) {
+    const col = passengerQueue[i];
+    if (col !== lastColor) {
+      runCount++;
+      if (runCount > maxColorRuns) {
+        break;
+      }
+      if (!distinctColors.has(col) && distinctColors.size >= maxColorRuns) {
+        break;
+      }
+      distinctColors.add(col);
+      lastColor = col;
+    }
+    limit = i + 1;
+  }
+
+  return limit;
+}
 
 /**
  * 4 Detailed Vehicle Classes with exact capacities requested by user:
@@ -517,19 +558,47 @@ export function assignStageMechanic(buses, stageLevel, gridWidth, gridHeight) {
  */
 export function sanitizeStage(rawStage) {
   const stageLevel = Math.max(1, Math.floor(rawStage.level || 1));
-  const gridWidth = rawStage.grid?.width || 7;
-  const gridHeight = rawStage.grid?.height || 7;
+  const rawW = rawStage.grid?.width || 7;
+  const rawH = rawStage.grid?.height || 7;
+  const inputBuses = Array.isArray(rawStage.buses) ? rawStage.buses : [];
+
+  // Expand grid dimensions for real campaign stages from Level 4+ to accommodate dense 12..24 vehicle grids
+  const shouldAugment = stageLevel >= 4 && inputBuses.length >= 6;
+  const minW = !shouldAugment
+    ? rawW
+    : stageLevel <= 6
+    ? 7
+    : stageLevel <= 15
+    ? 8
+    : stageLevel <= 45
+    ? 9
+    : 10;
+  const minH = !shouldAugment
+    ? rawH
+    : stageLevel <= 6
+    ? 7
+    : stageLevel <= 15
+    ? 8
+    : stageLevel <= 35
+    ? 9
+    : 10;
+
+  const gridWidth = Math.max(rawW, minW);
+  const gridHeight = Math.max(rawH, minH);
+  const shiftX = Math.floor((gridWidth - rawW) / 2);
+  const shiftZ = gridHeight > rawH ? 1 : 0;
+
   const occupied = new Set();
   const sanitizedBuses = [];
-
-  const inputBuses = Array.isArray(rawStage.buses) ? rawStage.buses : [];
 
   for (let idx = 0; idx < inputBuses.length; idx++) {
     const raw = inputBuses[idx];
     const resolved = resolveVehicleClass(raw, idx, stageLevel);
     const dir = DIR_VECTORS[raw.dir] ? raw.dir : 'N';
-    const hx = raw.hx !== undefined ? raw.hx : raw.anchorX;
-    const hz = raw.hz !== undefined ? raw.hz : raw.anchorZ;
+    const baseHx = raw.hx !== undefined ? raw.hx : raw.anchorX;
+    const baseHz = raw.hz !== undefined ? raw.hz : raw.anchorZ;
+    const hx = baseHx + shiftX;
+    const hz = baseHz + shiftZ;
 
     // Try preferredLength first (e.g. 3 for bus/double_bus), falling back to fallbackLength if tight in legacy pack
     let chosenCandidate = null;
@@ -611,8 +680,22 @@ export function sanitizeStage(rawStage) {
     }
   }
 
-  // Ensure every stage can be peeled (no permanent mutual cycles)
+  // Ensure existing buses can be peeled before adding outer reverse-peel blockers
   fixMutualCycles(sanitizedBuses, gridWidth, gridHeight);
+
+  // From Level 4 onward, augment sparse grids into dense 12..24 interlocking vehicle grids
+  // and stratify colors so buried target buses have distinct colors from outer blockers
+  if (shouldAugment) {
+    augmentDenseInterlockingBuses(
+      sanitizedBuses,
+      occupied,
+      gridWidth,
+      gridHeight,
+      stageLevel
+    );
+    fixMutualCycles(sanitizedBuses, gridWidth, gridHeight);
+    stratifyBlockerColors(sanitizedBuses, gridWidth, gridHeight, stageLevel);
+  }
 
   // Attach strictly 1 progressive mechanic for this level (1 new mechanic every 10 levels)
   const activeMechanic = assignStageMechanic(
@@ -677,6 +760,230 @@ export function findBlockingBus(targetBus, activeBuses, gridWidth, gridHeight) {
 }
 
 /**
+ * Scores a Reverse-Peel candidate vehicle placement by how effectively it blocks
+ * existing vehicles on the grid (especially turning unblocked vehicles into blocked ones
+ * and creating perpendicular cross-axis interlocks).
+ */
+function scoreBlockerPlacement(candidate, existingBuses, gridWidth, gridHeight) {
+  const candCells = getBusCells(candidate);
+  const candSet = new Set();
+  for (let i = 0; i < candCells.length; i++) {
+    candSet.add(`${candCells[i].x},${candCells[i].z}`);
+  }
+
+  const candVert = candidate.dir === 'N' || candidate.dir === 'S';
+  let score = 0;
+
+  for (let i = 0; i < existingBuses.length; i++) {
+    const eb = existingBuses[i];
+    const vec = DIR_VECTORS[eb.dir] || DIR_VECTORS.N;
+    let cx = eb.hx + vec.dx;
+    let cz = eb.hz + vec.dz;
+    let dist = 1;
+    let hitsCand = false;
+
+    while (cx >= 0 && cx < gridWidth && cz >= 0 && cz < gridHeight) {
+      if (candSet.has(`${cx},${cz}`)) {
+        hitsCand = true;
+        break;
+      }
+      cx += vec.dx;
+      cz += vec.dz;
+      dist++;
+    }
+
+    if (hitsCand) {
+      const wasUnblocked = !findBlockingBus(eb, existingBuses, gridWidth, gridHeight);
+      score += wasUnblocked ? 24 : 8;
+      if (dist <= 2) score += 6;
+      const ebVert = eb.dir === 'N' || eb.dir === 'S';
+      if (candVert !== ebVert) {
+        score += 10; // Perpendicular cross-block bonus
+      }
+    }
+  }
+
+  return score;
+}
+
+/**
+ * Augments Level 4+ stages up to 12..24 vehicles by wrapping outer Reverse-Peel blocker vehicles
+ * across the exit paths of existing vehicles so the grid is tightly interlocked.
+ */
+function augmentDenseInterlockingBuses(
+  buses,
+  occupied,
+  gridWidth,
+  gridHeight,
+  stageLevel
+) {
+  const isBoss = stageLevel % 5 === 0;
+  let targetCount = 13;
+  if (stageLevel <= 6) {
+    targetCount = 13 + (stageLevel - 4) + (isBoss ? 1 : 0);
+  } else if (stageLevel <= 12) {
+    targetCount = 15 + Math.floor((stageLevel - 6) * 0.5) + (isBoss ? 1 : 0);
+  } else if (stageLevel <= 30) {
+    targetCount = 16 + Math.floor((stageLevel - 12) * 0.22) + (isBoss ? 2 : 0);
+  } else {
+    targetCount = Math.min(
+      24,
+      19 + Math.floor((stageLevel - 30) * 0.08) + (isBoss ? 2 : 0)
+    );
+  }
+
+  if (buses.length >= targetCount) return;
+
+  const rng = createRng(stageLevel * 7919 + 4099);
+  const numColors = Math.min(
+    COLORS_PALETTE.length,
+    6 + Math.floor((stageLevel - 2) / 3)
+  );
+  const activeColors = [];
+  for (let i = 0; i < numColors; i++) {
+    activeColors.push(COLORS_PALETTE[(i + stageLevel * 3) % COLORS_PALETTE.length]);
+  }
+  const dirs = ['E', 'W', 'N', 'S'];
+
+  let added = 0;
+  const needed = targetCount - buses.length;
+
+  for (let pass = 0; pass < needed * 3 && buses.length < targetCount; pass++) {
+    const roll = rng();
+    const type =
+      roll < 0.18
+        ? 'taxi'
+        : roll < 0.54
+        ? 'minibus'
+        : roll < 0.82
+        ? 'bus'
+        : 'double_bus';
+    const spec = VEHICLE_SPECS[type];
+    const length = spec.length;
+    const capacity = spec.defaultCapacity;
+    const color = activeColors[(buses.length + pass) % activeColors.length];
+
+    let bestCandidate = null;
+    let bestScore = -1;
+
+    for (let d = 0; d < dirs.length; d++) {
+      const dir = dirs[(d + pass) % dirs.length];
+      for (let z = 0; z < gridHeight; z++) {
+        for (let x = 0; x < gridWidth; x++) {
+          const cand = {
+            id: `bus_aug_${stageLevel}_${buses.length + 1}`,
+            type,
+            color,
+            dir,
+            length,
+            capacity,
+            hx: x,
+            hz: z,
+          };
+          if (!isBusInBounds(cand, gridWidth, gridHeight)) continue;
+          const cells = getBusCells(cand);
+          let overlap = false;
+          for (let c = 0; c < cells.length; c++) {
+            if (occupied.has(`${cells[c].x},${cells[c].z}`)) {
+              overlap = true;
+              break;
+            }
+          }
+          if (overlap) continue;
+
+          // Reverse-Peel invariant: new outer blocker must be able to exit before existing buses
+          if (findBlockingBus(cand, buses, gridWidth, gridHeight)) continue;
+
+          const sc =
+            scoreBlockerPlacement(cand, buses, gridWidth, gridHeight) +
+            rng() * 2.5;
+          if (sc > bestScore) {
+            bestScore = sc;
+            bestCandidate = cand;
+          }
+        }
+      }
+    }
+
+    if (bestCandidate) {
+      const cells = getBusCells(bestCandidate);
+      for (let c = 0; c < cells.length; c++) {
+        occupied.add(`${cells[c].x},${cells[c].z}`);
+      }
+      buses.push(bestCandidate);
+      added++;
+    } else if (added === 0) {
+      break;
+    }
+  }
+}
+
+/**
+ * Stratifies vehicle colors on Level 4+ across up to 10 distinct colors so that:
+ * 1. Buried (blocked) vehicles get dedicated `buriedColors` (3 distinct colors) that NEVER appear
+ *    on any initially unblocked perimeter vehicle,
+ * 2. Buried target vehicles are upgraded to high-capacity classes (minibus 15, bus 25, double_bus 40)
+ *    so the Revolving Circle contains big contiguous color chunks (max 2–3 colors per circle),
+ * 3. Direct blocker vehicles never share the same color as the vehicle they block.
+ */
+function stratifyBlockerColors(buses, gridWidth, gridHeight, stageLevel) {
+  if (stageLevel < 4 || buses.length < 6) return;
+
+  const numColors = Math.min(
+    COLORS_PALETTE.length,
+    6 + Math.floor((stageLevel - 2) / 3)
+  );
+
+  // Rotate across all 10 colors deterministically per level so white & bronze appear early too
+  const rotated = [];
+  for (let i = 0; i < numColors; i++) {
+    rotated.push(COLORS_PALETTE[(i + stageLevel * 3) % COLORS_PALETTE.length]);
+  }
+
+  const blockedBuses = [];
+  const unblockedBuses = [];
+  for (let i = 0; i < buses.length; i++) {
+    const b = buses[i];
+    if (b.mechanic === 'tow_truck') continue;
+    if (findBlockingBus(b, buses, gridWidth, gridHeight)) {
+      blockedBuses.push(b);
+    } else {
+      unblockedBuses.push(b);
+    }
+  }
+
+  // Reserve 3 buried colors exclusively for blocked vehicles so all 3 initial circle color chunks are buried!
+  const buriedCount = Math.min(3, Math.max(2, blockedBuses.length));
+  const buriedColors = rotated.slice(0, buriedCount);
+  const blockerColors = rotated.slice(buriedCount);
+
+  for (let i = 0; i < blockedBuses.length; i++) {
+    const b = blockedBuses[i];
+    b.color = buriedColors[i % buriedColors.length];
+    // Upgrade small 3-seat buried taxis into 15-seat minibuses so buried circle chunks are always BIG!
+    if (b.type === 'taxi' && b.capacity < 15 && !b.mechanic) {
+      b.type = 'minibus';
+      b.capacity = 15;
+    }
+  }
+
+  for (let i = 0; i < unblockedBuses.length; i++) {
+    const b = unblockedBuses[i];
+    b.color = blockerColors[i % blockerColors.length];
+  }
+
+  // Ensure no blocked bus shares the exact same color as its immediate blocker
+  for (let i = 0; i < buses.length; i++) {
+    const b = buses[i];
+    const blk = findBlockingBus(b, buses, gridWidth, gridHeight);
+    if (blk && blk.color === b.color && buriedColors.length > 1) {
+      const alt = buriedColors.find((c) => c !== blk.color) || rotated[0];
+      b.color = alt;
+    }
+  }
+}
+
+/**
  * Computes a valid peel order of buses from the grid by repeatedly removing unblocked buses.
  * If any buses are stuck in a cycle (e.g. two buses facing head-to-head), flips directions so
  * 100% of buses can exit the lot without deadlocking.
@@ -728,6 +1035,84 @@ export function fixMutualCycles(buses, gridWidth, gridHeight) {
 }
 
 /**
+ * Computes the minimal ordered sequence `[B_1, B_2, ..., B_k]` (1 <= k <= maxDepth)
+ * of blocker vehicles in `remainingBuses` that must be peeled in order to unblock `targetBus`.
+ * Returns `null` if `targetBus` requires more than `maxDepth` blockers or cannot be cleanly peeled.
+ */
+export function computeBlockerPeelChain(
+  targetBus,
+  remainingBuses,
+  gridWidth,
+  gridHeight,
+  maxDepth = 3
+) {
+  if (!findBlockingBus(targetBus, remainingBuses, gridWidth, gridHeight)) {
+    return [];
+  }
+
+  const cellMap = new Map();
+  for (let i = 0; i < remainingBuses.length; i++) {
+    const b = remainingBuses[i];
+    const cells = getBusCells(b);
+    for (let c = 0; c < cells.length; c++) {
+      cellMap.set(`${cells[c].x},${cells[c].z}`, b);
+    }
+  }
+
+  const neededIds = new Set();
+  const queue = [targetBus];
+
+  while (queue.length > 0 && neededIds.size <= maxDepth + 1) {
+    const cur = queue.shift();
+    const vec = DIR_VECTORS[cur.dir] || DIR_VECTORS.N;
+    let cx = cur.hx + vec.dx;
+    let cz = cur.hz + vec.dz;
+
+    while (cx >= 0 && cx < gridWidth && cz >= 0 && cz < gridHeight) {
+      const hit = cellMap.get(`${cx},${cz}`);
+      if (hit && hit.id !== cur.id) {
+        if (hit.id === targetBus.id) return null; // mutual cycle guard
+        if (!neededIds.has(hit.id)) {
+          neededIds.add(hit.id);
+          queue.push(hit);
+        }
+      }
+      cx += vec.dx;
+      cz += vec.dz;
+    }
+  }
+
+  if (neededIds.size === 0 || neededIds.size > maxDepth) {
+    return null;
+  }
+
+  // Verify the blockers in `neededIds` can be peeled one by one from `remainingBuses`
+  const sim = remainingBuses.slice();
+  const chain = [];
+
+  while (chain.length < neededIds.size) {
+    let pickIdx = -1;
+    for (let i = 0; i < sim.length; i++) {
+      const cand = sim[i];
+      if (!neededIds.has(cand.id)) continue;
+      if (!findBlockingBus(cand, sim, gridWidth, gridHeight)) {
+        pickIdx = i;
+        break;
+      }
+    }
+    if (pickIdx === -1) return null;
+    chain.push(sim[pickIdx]);
+    sim.splice(pickIdx, 1);
+  }
+
+  if (findBlockingBus(targetBus, sim, gridWidth, gridHeight)) {
+    return null;
+  }
+
+  return chain;
+}
+
+/**
  * Expands a peeled vehicle list into passenger color segments, accounting for:
  * - tow_truck: 0 passengers
  * - dual_color: firstHalf of primary color + secondHalf of secondaryColor
@@ -764,8 +1149,48 @@ function expandBusPassengerSegments(peeledBuses) {
 }
 
 /**
- * Simulates peeling the buses and builds a passengerQueue in solvable wave order
- * with progressive color chunking based on levelNumber.
+ * Coalesces a list of `{ color, remaining }` segments by merging same-color segments
+ * in order of first appearance so every color forms a single giant contiguous chunk.
+ */
+function coalesceColorSegments(segments) {
+  const map = new Map();
+  const order = [];
+  for (let i = 0; i < segments.length; i++) {
+    const s = segments[i];
+    if (!s || s.remaining <= 0) continue;
+    if (!map.has(s.color)) {
+      map.set(s.color, 0);
+      order.push(s.color);
+    }
+    map.set(s.color, map.get(s.color) + s.remaining);
+  }
+  return order.map((color) => ({ color, remaining: map.get(color) }));
+}
+
+/**
+ * Appends an array of `{ color, remaining }` segments into `queue`.
+ */
+function pushSegmentsToQueue(queue, segments) {
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    for (let c = 0; c < seg.remaining; c++) {
+      queue.push(seg.color);
+    }
+  }
+}
+
+/**
+ * Builds a solvable passengerQueue with BIG CONTIGUOUS COLOR CHUNKS so the Revolving Circle
+ * NEVER holds more than 3 colors at a time:
+ * - Levels 1–3: Gentle onboarding with unblocked peel order and merged contiguous color blocks.
+ * - Levels 4+: Blocker-Buried Big-Chunk Waves!
+ *   1. Groups same-color vehicles that can be uncovered together into giant contiguous color chunks
+ *      (25 to 75+ passengers per color chunk — zero small 4–8 passenger interleaving!).
+ *   2. Places the first 3 distinct buried target color chunks at the very front of `passengerQueue`
+ *      so all 3 initial color slots in the Revolving Circle belong to buried vehicles (0 unblocked
+ *      vehicles on the grid match the circle at stage start!).
+ *   3. Places the outer blocker chunks in the Feeder Line right behind the circle so they walk
+ *      into the circle and clear the parking bays as soon as a buried circle chunk finishes!
  */
 export function buildBalancedPassengerQueue(
   buses,
@@ -774,74 +1199,290 @@ export function buildBalancedPassengerQueue(
   gridHeight,
   levelNumber = 1
 ) {
-  // Simulate peeling buses in solvable order.
-  const remaining = buses.map((b) => ({ ...b }));
-  const peeledBuses = [];
-  let lastColor = null;
-
-  while (remaining.length > 0) {
-    const unblockedIndices = [];
-    for (let i = 0; i < remaining.length; i++) {
-      if (!findBlockingBus(remaining[i], remaining, gridWidth, gridHeight)) {
-        unblockedIndices.push(i);
-      }
-    }
-
-    let pickIdx = unblockedIndices.length > 0 ? unblockedIndices[0] : 0;
-    if (levelNumber <= 5 && lastColor && unblockedIndices.length > 1) {
-      const sameColorIdx = unblockedIndices.find(
-        (idx) => remaining[idx].color === lastColor && !remaining[idx].mechanic
-      );
-      if (sameColorIdx !== undefined) {
-        pickIdx = sameColorIdx;
-      }
-    }
-
-    const picked = remaining.splice(pickIdx, 1)[0];
-    lastColor = picked.color;
-    peeledBuses.push(picked);
-  }
-
-  const segments = expandBusPassengerSegments(peeledBuses);
   const lvl = Math.max(1, Math.floor(levelNumber || 1));
+  const remaining = buses.map((b) => ({ ...b }));
 
-  // Levels 1 to 4: 100% pure contiguous chunks per bus segment (zero interleaving)
-  if (lvl <= 4) {
-    const pureQueue = [];
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      for (let c = 0; c < seg.remaining; c++) {
-        pureQueue.push(seg.color);
+  // Levels 1 to 3: Gentle tutorial onboarding (peel unblocked vehicles first, coalesced into big chunks)
+  if (lvl <= 3) {
+    const peeledBuses = [];
+    let lastColor = null;
+
+    while (remaining.length > 0) {
+      const unblockedIndices = [];
+      for (let i = 0; i < remaining.length; i++) {
+        if (!findBlockingBus(remaining[i], remaining, gridWidth, gridHeight)) {
+          unblockedIndices.push(i);
+        }
       }
+
+      let pickIdx = unblockedIndices.length > 0 ? unblockedIndices[0] : 0;
+      if (lastColor && unblockedIndices.length > 1) {
+        const sameColorIdx = unblockedIndices.find(
+          (idx) => remaining[idx].color === lastColor && !remaining[idx].mechanic
+        );
+        if (sameColorIdx !== undefined) {
+          pickIdx = sameColorIdx;
+        }
+      }
+
+      const picked = remaining.splice(pickIdx, 1)[0];
+      lastColor = picked.color;
+      peeledBuses.push(picked);
     }
+
+    const segments = expandBusPassengerSegments(peeledBuses);
+    const pureQueue = [];
+    pushSegmentsToQueue(pureQueue, segments);
     return pureQueue;
   }
 
-  // Levels 5+: Progressive chunked interleaving within small solvable waves (2..3 segments)
-  // Because buses now hold 3, 15, 25, or 40 passengers, scale chunk sizes cleanly
-  const waveSegCount = lvl <= 12 ? 2 : 3;
-  const chunkSize = lvl <= 8 ? 8 : lvl <= 18 ? 6 : lvl <= 35 ? 5 : lvl <= 60 ? 4 : 3;
+  // Levels 4+: Sharp difficulty ramp with Big Contiguous Color Chunks & Buried Circle Targets!
+  const initialUnblockedColors = new Set(
+    remaining
+      .filter((b) => !findBlockingBus(b, remaining, gridWidth, gridHeight))
+      .map((b) => b.color)
+  );
 
-  const queue = [];
-  for (let w = 0; w < segments.length; w += waveSegCount) {
-    const wave = segments.slice(w, w + waveSegCount).map((s) => ({
-      color: s.color,
-      remaining: s.remaining,
-    }));
+  const maxBlockersPerWave = lvl <= 7 ? 2 : 3;
+  const waves = [];
+  const usedLeadTargetColors = new Set();
+  let dispatchedCount = 0;
 
-    let anyLeft = true;
-    while (anyLeft) {
-      anyLeft = false;
-      for (let i = 0; i < wave.length; i++) {
-        if (wave[i].remaining > 0) {
-          const take = Math.min(chunkSize, wave[i].remaining);
-          for (let k = 0; k < take; k++) {
-            queue.push(wave[i].color);
-          }
-          wave[i].remaining -= take;
-          if (wave[i].remaining > 0) anyLeft = true;
+  while (remaining.length > 0) {
+    const unblockedList = remaining.filter(
+      (b) => !findBlockingBus(b, remaining, gridWidth, gridHeight)
+    );
+    const unblockedColors = new Set(unblockedList.map((b) => b.color));
+
+    let bestTarget = null;
+    let bestChain = null;
+    let bestScore = -1;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const cand = remaining[i];
+      if (cand.mechanic === 'tow_truck' || cand.capacity <= 0) continue;
+      if (cand.mechanic === 'lift_barrier' && dispatchedCount === 0) continue;
+      if (cand.mechanic === 'vip_rope' && dispatchedCount < 2) continue;
+
+      const chain = computeBlockerPeelChain(
+        cand,
+        remaining,
+        gridWidth,
+        gridHeight,
+        maxBlockersPerWave
+      );
+      if (!chain || chain.length === 0) continue;
+
+      const bayBlockers = chain.filter(
+        (b) => b.mechanic !== 'tow_truck' && b.capacity > 0
+      );
+      if (bayBlockers.length > maxBlockersPerWave) continue;
+
+      const hasLockedBlocker = chain.some(
+        (b, idx) =>
+          (b.mechanic === 'lift_barrier' && dispatchedCount === 0) ||
+          (b.mechanic === 'vip_rope' && dispatchedCount + idx < 2)
+      );
+      if (hasLockedBlocker) continue;
+
+      const sameColorBlocker = bayBlockers.some((b) => b.color === cand.color);
+      if (sameColorBlocker) continue;
+
+      let sc = bayBlockers.length * 28;
+      if (!initialUnblockedColors.has(cand.color)) {
+        sc += 180; // Never unblocked at stage start!
+      }
+      if (!unblockedColors.has(cand.color)) {
+        sc += 90;
+      }
+      if (!usedLeadTargetColors.has(cand.color)) {
+        sc += 65; // Prefer distinct buried colors for the initial 3 circle chunks
+      }
+      if (cand.capacity >= 25) {
+        sc += 35;
+      } else if (cand.capacity >= 15) {
+        sc += 20;
+      }
+      if (sc > bestScore) {
+        bestScore = sc;
+        bestTarget = cand;
+        bestChain = chain;
+      }
+    }
+
+    if (bestTarget && bestChain) {
+      const removeIds = new Set(bestChain.map((b) => b.id));
+      removeIds.add(bestTarget.id);
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        if (removeIds.has(remaining[i].id)) {
+          remaining.splice(i, 1);
         }
       }
+
+      const targetGroup = [bestTarget];
+      usedLeadTargetColors.add(bestTarget.color);
+
+      // BIG CHUNK MERGE: If another vehicle of `bestTarget.color` is now unblocked (0 extra bays needed!),
+      // group it right into `targetGroup` so this color chunk is even more massive (40..80 passengers)!
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        const extra = remaining[i];
+        if (
+          extra.color === bestTarget.color &&
+          !extra.mechanic &&
+          !findBlockingBus(extra, remaining, gridWidth, gridHeight)
+        ) {
+          targetGroup.push(extra);
+          remaining.splice(i, 1);
+        }
+      }
+
+      // Also merge any now-unblocked same-color vehicles into the blocker group for larger blocker chunks
+      const blockerColorsInChain = new Set(bestChain.map((b) => b.color));
+      const blockerGroup = bestChain.slice();
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        const extra = remaining[i];
+        if (
+          blockerColorsInChain.has(extra.color) &&
+          !extra.mechanic &&
+          !findBlockingBus(extra, remaining, gridWidth, gridHeight)
+        ) {
+          blockerGroup.push(extra);
+          remaining.splice(i, 1);
+        }
+      }
+
+      dispatchedCount += targetGroup.length + blockerGroup.length;
+
+      waves.push({
+        isBuriedAtStart: !initialUnblockedColors.has(bestTarget.color),
+        targetColor: bestTarget.color,
+        targetSegs: coalesceColorSegments(expandBusPassengerSegments(targetGroup)),
+        blockerSegs: coalesceColorSegments(expandBusPassengerSegments(blockerGroup)),
+      });
+    } else {
+      // Peel all currently unblocked vehicles of the same color together as one big contiguous chunk
+      const unblockedIdx = remaining.findIndex(
+        (b) => !findBlockingBus(b, remaining, gridWidth, gridHeight)
+      );
+      const pickIdx = unblockedIdx !== -1 ? unblockedIdx : 0;
+      const picked = remaining.splice(pickIdx, 1)[0];
+      const sameColorGroup = [picked];
+
+      for (let i = remaining.length - 1; i >= 0; i--) {
+        const extra = remaining[i];
+        if (
+          extra.color === picked.color &&
+          !extra.mechanic &&
+          !findBlockingBus(extra, remaining, gridWidth, gridHeight)
+        ) {
+          sameColorGroup.push(extra);
+          remaining.splice(i, 1);
+        }
+      }
+
+      dispatchedCount += sameColorGroup.length;
+      waves.push({
+        isBuriedAtStart: !initialUnblockedColors.has(picked.color),
+        targetColor: picked.color,
+        targetSegs: coalesceColorSegments(expandBusPassengerSegments(sameColorGroup)),
+        blockerSegs: [],
+      });
+    }
+  }
+
+  // Assemble the big-chunk queue so all 3 initial circle runs are filled with
+  // buried target chunks (0 unblocked matches at stage start!), followed immediately
+  // by Wave 1's blocker chunks at the front of the Feeder Line!
+  const queue = [];
+  const leadWaveIndices = [];
+  let lastLeadColor = null;
+
+  // First pass: prefer 3 distinct buried target colors
+  const leadColors = new Set();
+  for (let i = 0; i < waves.length && leadWaveIndices.length < 3; i++) {
+    const w = waves[i];
+    const allSegsBuried =
+      w.targetSegs.length > 0 &&
+      w.targetSegs.every((s) => !initialUnblockedColors.has(s.color));
+    if (
+      w.isBuriedAtStart &&
+      allSegsBuried &&
+      !leadColors.has(w.targetColor) &&
+      w.targetColor !== lastLeadColor
+    ) {
+      leadWaveIndices.push(i);
+      leadColors.add(w.targetColor);
+      lastLeadColor = w.targetSegs[w.targetSegs.length - 1].color;
+    }
+  }
+
+  // Second pass: if fewer than 3 distinct buried colors exist, allow a 3rd buried wave whose color differs from lastLeadColor
+  if (leadWaveIndices.length < 3) {
+    const pickedSet = new Set(leadWaveIndices);
+    for (let i = 0; i < waves.length && leadWaveIndices.length < 3; i++) {
+      if (pickedSet.has(i)) continue;
+      const w = waves[i];
+      const allSegsBuried =
+        w.targetSegs.length > 0 &&
+        w.targetSegs.every((s) => !initialUnblockedColors.has(s.color));
+      if (w.isBuriedAtStart && allSegsBuried && w.targetColor !== lastLeadColor) {
+        leadWaveIndices.push(i);
+        pickedSet.add(i);
+        lastLeadColor = w.targetSegs[w.targetSegs.length - 1].color;
+      }
+    }
+  }
+
+  if (leadWaveIndices.length > 0) {
+    // Emit the buried lead target chunks (guaranteeing 3 contiguous buried runs at the front of the queue!)
+    if (
+      leadWaveIndices.length === 2 &&
+      waves[leadWaveIndices[0]].targetSegs[0]?.remaining >= 6
+    ) {
+      // Split the first giant buried chunk across Run 1 and Run 3 with Run 2 in between: [C1a, C2, C1b]
+      // so all 3 initial circle runs use only the 2 buried colors (C1 and C2)!
+      const seg0 = waves[leadWaveIndices[0]].targetSegs[0];
+      const halfA = Math.ceil(seg0.remaining / 2);
+      const halfB = seg0.remaining - halfA;
+      pushSegmentsToQueue(queue, [{ color: seg0.color, remaining: halfA }]);
+      pushSegmentsToQueue(queue, waves[leadWaveIndices[1]].targetSegs);
+      pushSegmentsToQueue(queue, [
+        { color: seg0.color, remaining: halfB },
+        ...waves[leadWaveIndices[0]].targetSegs.slice(1),
+      ]);
+    } else {
+      for (let i = 0; i < leadWaveIndices.length; i++) {
+        pushSegmentsToQueue(queue, waves[leadWaveIndices[i]].targetSegs);
+      }
+    }
+
+    const leadSet = new Set(leadWaveIndices);
+    const otherWaves = [];
+    for (let i = 0; i < waves.length; i++) {
+      if (!leadSet.has(i)) {
+        otherWaves.push(waves[i]);
+      }
+    }
+
+    // 2. Emit lead waves' blocker chunks interleaved with subsequent target waves
+    let otherIdx = 0;
+    for (let i = 0; i < leadWaveIndices.length; i++) {
+      pushSegmentsToQueue(queue, waves[leadWaveIndices[i]].blockerSegs);
+      if (otherIdx < otherWaves.length) {
+        pushSegmentsToQueue(queue, otherWaves[otherIdx].targetSegs);
+        pushSegmentsToQueue(queue, otherWaves[otherIdx].blockerSegs);
+        otherIdx++;
+      }
+    }
+    while (otherIdx < otherWaves.length) {
+      pushSegmentsToQueue(queue, otherWaves[otherIdx].targetSegs);
+      pushSegmentsToQueue(queue, otherWaves[otherIdx].blockerSegs);
+      otherIdx++;
+    }
+  } else {
+    for (let i = 0; i < waves.length; i++) {
+      pushSegmentsToQueue(queue, waves[i].targetSegs);
+      pushSegmentsToQueue(queue, waves[i].blockerSegs);
     }
   }
 
@@ -863,25 +1504,55 @@ function createRng(seed) {
 
 /**
  * Reverse-Peel Solvable Stage Generator.
- * Creates zero-overlap, 100% solvable levels across all 100 City Stations and beyond.
+ * Creates dense 12..24 interlocking vehicle grids with multi-layer blocker chains across all 100 City Stations.
  */
 export function generateSolvableStage(levelNumber, customSeed) {
   const rng = createRng(customSeed !== undefined ? customSeed : levelNumber * 9973 + 1337);
 
   const milestoneTier = Math.floor((levelNumber - 1) / 10);
-  const gridWidth = Math.min(9, 6 + Math.min(3, Math.floor(levelNumber / 8)));
-  const gridHeight = Math.min(9, 6 + Math.min(3, Math.floor(levelNumber / 6)));
+  const gridWidth =
+    levelNumber <= 3
+      ? 6
+      : levelNumber <= 6
+      ? 7
+      : levelNumber <= 15
+      ? 8
+      : levelNumber <= 40
+      ? 9
+      : 10;
+  const gridHeight =
+    levelNumber <= 3
+      ? 6
+      : levelNumber <= 6
+      ? 7
+      : levelNumber <= 15
+      ? 8
+      : levelNumber <= 35
+      ? 9
+      : 10;
 
-  const targetBusCount = Math.min(
-    16,
-    6 + Math.floor(levelNumber * 0.14) + (levelNumber % 5 === 0 ? 2 : 0)
-  );
+  const isBoss = levelNumber % 5 === 0;
+  const targetBusCount =
+    levelNumber <= 3
+      ? 8 + levelNumber
+      : Math.min(
+          24,
+          13 +
+            Math.floor((levelNumber - 4) * 0.22) +
+            (isBoss ? 2 : 0) +
+            (levelNumber % 10 === 0 ? 2 : 0)
+        );
 
   const numColors = Math.min(
     COLORS_PALETTE.length,
-    3 + Math.floor(levelNumber / 6)
+    levelNumber <= 3 ? 5 : 6 + Math.floor((levelNumber - 2) / 3)
   );
-  const activeColors = COLORS_PALETTE.slice(0, numColors);
+  const activeColors = [];
+  for (let i = 0; i < numColors; i++) {
+    activeColors.push(
+      COLORS_PALETTE[(i + levelNumber * 3) % COLORS_PALETTE.length]
+    );
+  }
 
   const occupied = new Set();
   const placedBuses = [];
@@ -890,11 +1561,11 @@ export function generateSolvableStage(levelNumber, customSeed) {
   for (let bIdx = 0; bIdx < targetBusCount * 4 && placedBuses.length < targetBusCount; bIdx++) {
     const roll = rng();
     let type = 'minibus';
-    if (roll < 0.30) {
+    if (roll < 0.20) {
       type = 'taxi';
-    } else if (roll < 0.62) {
+    } else if (roll < 0.56) {
       type = 'minibus';
-    } else if (roll < 0.85) {
+    } else if (roll < 0.84) {
       type = 'bus';
     } else {
       type = 'double_bus';
@@ -905,54 +1576,56 @@ export function generateSolvableStage(levelNumber, customSeed) {
     const capacity = spec.defaultCapacity;
     const color = activeColors[placedBuses.length % activeColors.length];
 
-    const dirOrder = dirs.slice().sort(() => rng() - 0.5);
-    if (rng() < 0.45) {
-      dirOrder.unshift('N');
-    }
+    let bestCandidate = null;
+    let bestScore = -1;
 
-    let chosen = null;
-    for (let d = 0; d < dirOrder.length && !chosen; d++) {
-      const dir = dirOrder[d];
-      for (let attempt = 0; attempt < 28; attempt++) {
-        const hx = Math.floor(rng() * gridWidth);
-        const hz = Math.floor(rng() * gridHeight);
-        const candidate = {
-          id: `bus_${placedBuses.length + 1}`,
-          type,
-          color,
-          dir,
-          length,
-          capacity,
-          hx,
-          hz,
-        };
+    for (let attempt = 0; attempt < 42; attempt++) {
+      const dir = dirs[Math.floor(rng() * dirs.length)];
+      const hx = Math.floor(rng() * gridWidth);
+      const hz = Math.floor(rng() * gridHeight);
+      const candidate = {
+        id: `bus_${placedBuses.length + 1}`,
+        type,
+        color,
+        dir,
+        length,
+        capacity,
+        hx,
+        hz,
+      };
 
-        if (!isBusInBounds(candidate, gridWidth, gridHeight)) continue;
+      if (!isBusInBounds(candidate, gridWidth, gridHeight)) continue;
 
-        const cells = getBusCells(candidate);
-        let overlap = false;
-        for (let c = 0; c < cells.length; c++) {
-          if (occupied.has(`${cells[c].x},${cells[c].z}`)) {
-            overlap = true;
-            break;
-          }
-        }
-        if (overlap) continue;
-
-        const blocker = findBlockingBus(candidate, placedBuses, gridWidth, gridHeight);
-        if (!blocker) {
-          chosen = candidate;
+      const cells = getBusCells(candidate);
+      let overlap = false;
+      for (let c = 0; c < cells.length; c++) {
+        if (occupied.has(`${cells[c].x},${cells[c].z}`)) {
+          overlap = true;
           break;
         }
       }
+      if (overlap) continue;
+
+      const blocker = findBlockingBus(candidate, placedBuses, gridWidth, gridHeight);
+      if (blocker) continue;
+
+      const sc =
+        levelNumber >= 4
+          ? scoreBlockerPlacement(candidate, placedBuses, gridWidth, gridHeight) +
+            rng() * 3.0
+          : rng();
+      if (sc > bestScore) {
+        bestScore = sc;
+        bestCandidate = candidate;
+      }
     }
 
-    if (chosen) {
-      const cells = getBusCells(chosen);
+    if (bestCandidate) {
+      const cells = getBusCells(bestCandidate);
       for (let c = 0; c < cells.length; c++) {
         occupied.add(`${cells[c].x},${cells[c].z}`);
       }
-      placedBuses.push(chosen);
+      placedBuses.push(bestCandidate);
     }
   }
 
@@ -973,3 +1646,4 @@ export function generateSolvableStage(levelNumber, customSeed) {
     buses: placedBuses,
   });
 }
+

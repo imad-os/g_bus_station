@@ -94,11 +94,12 @@
         </div>
 
         <div class="hud-center-title-wrap">
-          <h1 id="hud-level-title" class="hud-level-title">Level 1</h1>
+          <h1 id="hud-level-title" class="hud-level-title">Station 1</h1>
           <div class="hud-meta-row">
             <span id="hud-sub-meta" class="hud-sub-meta">Queue: 0</span>
             <span class="hud-meta-sep">·</span>
             <span id="hud-coins-meta" class="hud-coins-meta">🪙 0 PTS</span>
+            <span id="hud-mechanic-pill" class="hud-mechanic-pill" hidden>❓ VIP TINT</span>
           </div>
         </div>
 
@@ -251,7 +252,7 @@
       </footer>
     </div>
 
-    <!-- Full-Screen Home Page: Transit Saga Map (100% Dark Mode) -->
+    <!-- Full-Screen Home Page: 100-Station City Transit Saga Map (100% Dark Mode) -->
     <div id="title-modal" class="modal-scrim modal-scrim-saga">
       <div class="modal-card modal-card-saga" role="dialog" aria-modal="true" aria-labelledby="title-modal-heading">
         <div class="saga-header-top">
@@ -266,9 +267,9 @@
               <path d="M52 28h18v-5l10 8-10 8v-5H52z" fill="#facc15" />
             </svg>
             <div class="saga-title-col">
-              <h2 id="title-modal-heading" class="modal-title">Bus Fever 3D: Transit Saga Map</h2>
+              <h2 id="title-modal-heading" class="modal-title">Bus Fever 3D: City Station Map</h2>
               <p id="title-modal-sub" class="modal-subtitle">
-                Clear stages without helpers for +3 PTS (+1 PT with helper). Spend PTS to unlock extra parking spots one by one!
+                100 City Stations · 10 Progressive Mechanics (1 Every 10 Stations) · Clear without helpers for +3 PTS!
               </p>
             </div>
           </div>
@@ -276,7 +277,7 @@
           <div class="modal-stats-row modal-stats-row-4">
             <div class="stat-tile">
               <span id="title-stat-lv-kicker" class="stat-tile-kicker">Unlocked</span>
-              <span id="title-stat-lv-val" class="stat-tile-val">Lv. 1</span>
+              <span id="title-stat-lv-val" class="stat-tile-val">Stn. 1</span>
             </div>
             <div class="stat-tile stat-tile-gold">
               <span id="title-stat-pts-kicker" class="stat-tile-kicker">Points / Coins</span>
@@ -291,9 +292,28 @@
               <span id="title-stat-score-val" class="stat-tile-val">0</span>
             </div>
           </div>
+
+          <!-- 5 City District Quick-Jump Tabs (Stations 1–100) -->
+          <div id="saga-district-tabs" class="saga-district-tabs" role="tablist" aria-label="City Districts">
+            <button type="button" class="saga-district-tab is-active" data-start-level="1">
+              🏙️ Stn 1–20 · Downtown
+            </button>
+            <button type="button" class="saga-district-tab" data-start-level="21">
+              🌉 Stn 21–40 · Harbor
+            </button>
+            <button type="button" class="saga-district-tab" data-start-level="41">
+              🚇 Stn 41–60 · Midtown
+            </button>
+            <button type="button" class="saga-district-tab" data-start-level="61">
+              ⚡ Stn 61–80 · Tech Park
+            </button>
+            <button type="button" class="saga-district-tab" data-start-level="81">
+              👑 Stn 81–100 · Uptown
+            </button>
+          </div>
         </div>
 
-        <!-- Full-Screen Winding Highway Transit Saga Map -->
+        <!-- Full-Screen Winding City Route Transit Saga Map (Horizontal on Wide TV, Vertical on Mobile) -->
         <div id="title-saga-scroll" class="saga-map-viewport" aria-label="Transit Saga Level Map">
           <div id="title-level-picker" class="saga-map-canvas"></div>
         </div>

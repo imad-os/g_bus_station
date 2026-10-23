@@ -12,6 +12,7 @@ import {
   DIR_VECTORS,
   getBusMeshDimensions,
   getBusWorldCenter,
+  getCircleActiveQueueLimit,
 } from './solver.js';
 
 export const COLOR_PALETTE_HEX = {
@@ -23,6 +24,8 @@ export const COLOR_PALETTE_HEX = {
   cyan:   { main: 0x06b6d4, light: 0x22d3ee, dark: 0x0e7490, css: '#06b6d4' },
   red:    { main: 0xef4444, light: 0xf87171, dark: 0xb91c1c, css: '#ef4444' },
   blue:   { main: 0x3b82f6, light: 0x60a5fa, dark: 0x1d4ed8, css: '#3b82f6' },
+  white:  { main: 0xe2e8f0, light: 0xffffff, dark: 0x475569, css: '#475569' },
+  bronze: { main: 0xa16207, light: 0xf59e0b, dark: 0x451a03, css: '#854d0e' },
 };
 
 export const TIME_OF_DAY_PRESETS = {
@@ -93,13 +96,13 @@ export const TIME_OF_DAY_PRESETS = {
 
 export const BAY_ANGLE = 0.42; // ~24 degrees (\ \ \ \ tilt)
 export const LOT_TOP_EDGE_Z = 0.45; // Fixed top edge of Zone C in vertical mode
-export const WIDE_LOT_LEFT_EDGE_X = 1.25; // Fixed left edge of Zone C (Z3) in wide TV mode
+export const WIDE_LOT_LEFT_EDGE_X = -0.15; // Fixed left edge of Zone C (Z3) in wide TV mode (60% width allocation)
 export const WIDE_ASPECT_THRESHOLD = 1.05; // Screens with aspect >= 1.05 use Wide (Z1 | Z2 | Z3) layout
 export const GRID_ORIGIN_Z = 5.25;
 export const ROAD_CENTER_Z = -3.75;
 export const LOOP_CENTER_Z = -8.45;
 export const GATE_POS = new THREE.Vector3(0, 0.15, -5.55);
-export const GATE_POS_WIDE = new THREE.Vector3(-6.7, 0.15, 0);
+export const GATE_POS_WIDE = new THREE.Vector3(-4.2, 0.15, 0);
 
 /**
  * Computes Zone C's center Z from its fixed top edge (LOT_TOP_EDGE_Z = 0.45) in vertical mode,
@@ -110,8 +113,8 @@ export function getDynamicGridOriginZ(gridHeight = 6) {
 }
 
 /**
- * Computes Zone C's center X from its fixed left edge (WIDE_LOT_LEFT_EDGE_X = 1.25) in wide mode,
- * guaranteeing a clean separation corridor to the right of Zone B's vertical parking bays.
+ * Computes Zone C's center X from its fixed left edge (WIDE_LOT_LEFT_EDGE_X = -0.15) in wide mode,
+ * allocating 60% of horizontal width to Zone 3, 10% to Zone 2, and 30% to Zone 1.
  */
 export function getDynamicGridOriginX(gridWidth = 6, layoutMode = 'vertical') {
   if (layoutMode === 'wide') {
@@ -217,7 +220,7 @@ export class Renderer3D {
 
     // Pre-allocated 3D Passenger Pool (for turning loop circle + waiting feeder line + runners)
     this.maxVisibleQueuePassengers = 320;
-    this.loopCapacityRows = 24; // 24 rows * 5 abreast = 120 passengers turning inside the oval circle
+    this.loopCapacityRows = 18; // 18 rows * 5 abreast = 90 passengers max turning inside the oval circle (capped at <= 3 color chunks)
     this.queuePassengerNodes = [];
     this.runnerPool = [];
     this.activeRunners = [];
@@ -510,13 +513,13 @@ export class Renderer3D {
     }
     this.loopCurve = new THREE.CatmullRomCurve3(loopPts, true, 'centripetal', 0.5);
 
-    // 2. Stationary Top-Right Feeder Line where overflow passengers wait in line before entering the circle
+    // 2. Compact Feeder Line where overflow passengers wait in line before entering the circle
     const feederPts = [
-      new THREE.Vector3(3.85, 0.14, -9.55),
-      new THREE.Vector3(4.85, 0.14, -10.95),
-      new THREE.Vector3(5.65, 0.14, -12.75),
-      new THREE.Vector3(6.25, 0.14, -14.75),
-      new THREE.Vector3(6.75, 0.14, -16.85),
+      new THREE.Vector3(3.85, 0.14, -9.35),
+      new THREE.Vector3(4.95, 0.14, -10.25),
+      new THREE.Vector3(5.95, 0.14, -11.05),
+      new THREE.Vector3(6.85, 0.14, -11.65),
+      new THREE.Vector3(7.65, 0.14, -12.10),
     ];
     this.feederCurve = new THREE.CatmullRomCurve3(feederPts, false, 'centripetal', 0.5);
     this.walkwayCurve = this.loopCurve;
@@ -538,7 +541,7 @@ export class Renderer3D {
     // ZONE B: Middle Weathered Dark Asphalt Boarding Road & 8 Angled Parking Bays
     // =========================================================================
     const roadWidth = 28;
-    const roadDepth = 3.35;
+    const roadDepth = 2.65;
     const roadGeo = new THREE.PlaneGeometry(roadWidth, roadDepth);
     this.roadMat = new THREE.MeshLambertMaterial({
       color: TIME_OF_DAY_PRESETS.night.asphaltTint,
@@ -565,8 +568,8 @@ export class Renderer3D {
     bottomCurb.position.set(0, 0.045, ROAD_CENTER_Z + roadDepth / 2);
     this.zoneBGroup.add(bottomCurb);
 
-    // Clean Dark Asphalt Exit/Approach Buffer Corridor between Zone B Parking Bays (z = -2.075)
-    // and Zone C Bus Puzzle Lot Top Edge (z = +0.45), creating a clear visual separation space
+    // Clean Dark Asphalt Exit/Approach Buffer Corridor between Zone B Parking Bays
+    // and Zone C Bus Puzzle Lot Top Edge in vertical phone mode
     const bufferDepth = LOT_TOP_EDGE_Z - (ROAD_CENTER_Z + roadDepth / 2) - 0.25;
     const bufferCenterZ = (ROAD_CENTER_Z + roadDepth / 2 + LOT_TOP_EDGE_Z) * 0.5;
     const bufferGeo = new THREE.PlaneGeometry(roadWidth, Math.max(1.2, bufferDepth));
@@ -577,6 +580,7 @@ export class Renderer3D {
     const bufferMesh = new THREE.Mesh(bufferGeo, bufferMat);
     bufferMesh.rotation.x = -Math.PI / 2;
     bufferMesh.position.set(0, 0.004, bufferCenterZ);
+    this.roadBufferMesh = bufferMesh;
     this.zoneBGroup.add(bufferMesh);
 
     this._buildParkingBays();
@@ -615,12 +619,12 @@ export class Renderer3D {
     pathMesh.position.y = 0.14;
     this.zoneAGroup.add(pathMesh);
 
-    // Top-right curved feeder walkway extension
+    // Top-right compact curved feeder walkway extension
     const feederCurve = new THREE.CatmullRomCurve3([
-      new THREE.Vector3(3.6, 0.06, -9.4),
-      new THREE.Vector3(4.9, 0.06, -11.0),
-      new THREE.Vector3(5.9, 0.06, -13.6),
-      new THREE.Vector3(6.5, 0.06, -16.6),
+      new THREE.Vector3(3.6, 0.06, -9.2),
+      new THREE.Vector3(5.0, 0.06, -10.3),
+      new THREE.Vector3(6.4, 0.06, -11.3),
+      new THREE.Vector3(7.7, 0.06, -12.1),
     ]);
     const feederTubeOuter = new THREE.TubeGeometry(feederCurve, 20, 1.52, 12, false);
     feederTubeOuter.scale(1, 0.09, 1);
@@ -1110,13 +1114,13 @@ export class Renderer3D {
     const isWide = this.layoutMode === 'wide';
 
     if (isWide) {
-      // Z1 (Left Column): Rotate Zone A by +90 deg so the turning loop & feeder queue sit on the left
-      // and the Boarding Gate faces right toward Z2
-      this.zoneAGroup.position.set(-1.15, 0, 0);
+      // Z1 (Left 30% Column): Rotate Zone A by +90 deg and tuck it right alongside Z2 so the Boarding Door Pad
+      // sits at worldX = -4.50 (gate edge at -3.90), eliminating the empty gap between Z1 and Z2!
+      this.zoneAGroup.position.set(1.65, 0, 0);
       this.zoneAGroup.rotation.y = Math.PI / 2;
 
-      // Z2 (Center Column): Rotate Zone B by +90 deg so the 8 angled parking bays form a vertical column in the center
-      this.zoneBGroup.position.set(0.85, 0, 0);
+      // Z2 (Middle 10% Column): Rotate Zone B by +90 deg so the 8 angled parking bays form a tight column at worldX = -2.60
+      this.zoneBGroup.position.set(1.10, 0, 0);
       this.zoneBGroup.rotation.y = Math.PI / 2;
     } else {
       // Vertical Phone Mode: Z1 Top -> Z2 Middle -> Z3 Bottom
@@ -1127,6 +1131,10 @@ export class Renderer3D {
       this.zoneBGroup.rotation.y = 0;
     }
 
+    if (this.roadBufferMesh) {
+      this.roadBufferMesh.visible = !isWide;
+    }
+
     // Update each parking bay's local & world coordinates so index 0..7 is Left->Right in vertical mode
     // and Top->Bottom in wide mode
     for (let i = 0; i < this.bayMeshes.length; i++) {
@@ -1134,7 +1142,7 @@ export class Renderer3D {
       if (isWide) {
         bay.x = -bay.localX;
         bay.group.position.set(bay.x, 0.025, bay.z);
-        bay.worldX = 0.85 + bay.z; // -2.85 in world space
+        bay.worldX = 1.10 + bay.z; // -2.60 in world space (tightly adjacent to Z1 gate at -3.90)
         bay.worldZ = bay.localX;   // -5.67 (top) to +5.67 (bottom)
         bay.worldRotY = Math.PI / 2 + BAY_ANGLE;
       } else {
@@ -2248,7 +2256,7 @@ export class Renderer3D {
 
     if (this.layoutMode === 'wide') {
       const originX = this.currentGridOriginX || getDynamicGridOriginX(gridWidth, 'wide');
-      const roadApproachX = -1.55;
+      const roadApproachX = -1.15;
       const topLaneZ = -halfGridH;
       const bottomLaneZ = halfGridH;
       const rightLaneX = originX + halfGridW;
@@ -2408,12 +2416,12 @@ export class Renderer3D {
     if (this.layoutMode === 'wide') {
       actor.waypoints = [
         {
-          x: -3.2,
+          x: -2.95,
           z: actor.group.position.z - 0.8,
           rotY: 0,
         },
         {
-          x: -3.2,
+          x: -2.95,
           z: -16.5,
           rotY: 0,
         },
@@ -2437,18 +2445,34 @@ export class Renderer3D {
 
   /**
    * Returns the array of passengerQueue indices (0 <= idx < queueLen) that are currently
-   * walking across the high-contrast Boarding Door Ground Pad (near uLoop = 0).
-   * Passengers can ONLY board a parked vehicle when their circling row reaches this door zone!
+  /**
+   * Returns the array of passengerQueue indices (0 <= idx < circlePassengerLimit) that are currently
+   * walking inside the Revolving Circle AND stepping across the high-contrast Boarding Door Ground Pad (near uLoop = 0).
+   * - The Revolving Circle holds at most 3 contiguous color chunks (`getCircleActiveQueueLimit(..., 3)`),
+   *   so there are NEVER more than 3 colors in the circle at a time.
+   * - Any passenger inside the Revolving Circle can board a matching parked vehicle when their row
+   *   crosses the Boarding Door Ground Pad; all subsequent color chunks wait in the Feeder Line!
    */
-  getDoorGateEligibleIndices(queueLen) {
+  getDoorGateEligibleIndices(queueLen, passengerQueue = null, _levelNumber = 1) {
     if (queueLen <= 0) return [];
     const abreast = 5;
-    const maxLoopRows = this.loopCapacityRows || 24;
-    const activeLoopRows = Math.min(maxLoopRows, Math.max(1, Math.ceil(queueLen / abreast)));
-    const maxLoopPassengers = Math.min(queueLen, activeLoopRows * abreast);
+    const maxLoopRows = this.loopCapacityRows || 18;
+    const maxLoopPassengers = maxLoopRows * abreast;
 
-    // Door Ground Pad spans +/- 0.16 of the loop around uLoop = 0 (expanded slightly when few rows remain)
-    const doorThreshold = activeLoopRows <= 4 ? 0.28 : 0.16;
+    const circlePassengerLimit =
+      Array.isArray(passengerQueue) && passengerQueue.length > 0
+        ? getCircleActiveQueueLimit(passengerQueue, maxLoopPassengers, 3)
+        : Math.min(queueLen, maxLoopPassengers);
+
+    if (circlePassengerLimit <= 0) return [];
+
+    const activeLoopRows = Math.min(
+      maxLoopRows,
+      Math.max(1, Math.ceil(circlePassengerLimit / abreast))
+    );
+
+    // Door Ground Pad spans +/- 0.22 of the loop around uLoop = 0
+    const doorThreshold = activeLoopRows <= 4 ? 0.32 : 0.22;
     const eligibleRows = [];
 
     for (let r = 0; r < activeLoopRows; r++) {
@@ -2459,7 +2483,8 @@ export class Renderer3D {
       }
     }
 
-    // Sort by closeness to the exact center of the Boarding Door Ground Pad
+    if (eligibleRows.length === 0) return [];
+
     eligibleRows.sort((a, b) => a.distFromDoor - b.distFromDoor);
 
     const eligibleIndices = [];
@@ -2467,25 +2492,34 @@ export class Renderer3D {
       const baseIdx = eligibleRows[i].rowIdx * abreast;
       for (let c = 0; c < abreast; c++) {
         const pIdx = baseIdx + c;
-        if (pIdx < maxLoopPassengers) {
+        if (pIdx < circlePassengerLimit) {
           eligibleIndices.push(pIdx);
         }
       }
     }
+
     return eligibleIndices;
   }
 
   /**
    * Updates the 3D Passenger Queue positions in tightly packed rows of 5 abreast:
-   * - Circle passengers revolve continuously around `this.loopCurve` and step across the
-   *   Neon Emerald & Gold Boarding Door Ground Pad (`uLoop = 0`).
-   * - Overflow passengers wait in line along `this.feederCurve`.
+   * - Circle passengers (`i < circlePassengerLimit`, strictly <= 3 contiguous color chunks) revolve
+   *   continuously around `this.loopCurve` and step across the Neon Emerald & Gold Boarding Door Ground Pad (`uLoop = 0`).
+   * - Overflow passengers (`i >= circlePassengerLimit`, colors 4..10) wait in line along `this.feederCurve`.
    */
   syncPassengerQueueVisuals(passengerQueue, elapsedSec) {
     const queueLen = passengerQueue.length;
     const abreast = 5;
-    const maxLoopRows = this.loopCapacityRows || 24;
-    const activeLoopRows = Math.min(maxLoopRows, Math.max(1, Math.ceil(queueLen / abreast)));
+    const maxLoopRows = this.loopCapacityRows || 18;
+    const circlePassengerLimit = getCircleActiveQueueLimit(
+      passengerQueue,
+      maxLoopRows * abreast,
+      3
+    );
+    const activeLoopRows = Math.min(
+      maxLoopRows,
+      Math.max(1, Math.ceil(circlePassengerLimit / abreast))
+    );
 
     const visualCount = Math.min(this.maxVisibleQueuePassengers, queueLen);
 
@@ -2500,12 +2534,14 @@ export class Renderer3D {
       const colorName = passengerQueue[i];
       this._setPassengerNodeColor(node, colorName);
 
-      const rowIdx = Math.floor(i / abreast);
-      const colIdx = i % abreast;
-
+      const isTurning = i < circlePassengerLimit;
+      let colIdx = 0;
       let atDoorBoost = 0;
-      if (rowIdx < activeLoopRows) {
-        // Inside the Oval Circle: continuously revolves at a steady pace
+
+      if (isTurning) {
+        // Inside the Oval Circle (at most 3 color chunks): continuously revolves at a steady pace
+        const rowIdx = Math.floor(i / abreast);
+        colIdx = i % abreast;
         const uLoop = ((rowIdx / activeLoopRows) + this.loopTurnPhase) % 1.0;
         this.loopCurve.getPointAt(uLoop, _curvePt);
         this.loopCurve.getTangentAt(uLoop, _curveTan);
@@ -2515,8 +2551,10 @@ export class Renderer3D {
           atDoorBoost = (1 - distFromDoor / 0.14) * 0.055;
         }
       } else {
-        // Overflow Feeder Line: waits in line and steps forward as passengers board
-        const feederRow = rowIdx - activeLoopRows + this.queueVisualScroll;
+        // Overflow Feeder Line (colors outside the 3 circle chunks): waits in line until a circle chunk clears
+        const feederIdx = i - circlePassengerLimit;
+        const feederRow = Math.floor(feederIdx / abreast) + this.queueVisualScroll;
+        colIdx = feederIdx % abreast;
         const uFeeder = Math.min(0.985, 0.035 + feederRow * 0.042);
         this.feederCurve.getPointAt(uFeeder, _curvePt);
         this.feederCurve.getTangentAt(uFeeder, _curveTan);
@@ -2525,7 +2563,6 @@ export class Renderer3D {
       _perpVec.set(-_curveTan.z, 0, _curveTan.x).normalize();
       const lateralOffset = (colIdx - (abreast - 1) / 2) * 0.34;
 
-      const isTurning = rowIdx < activeLoopRows;
       const bobFreq = isTurning ? 8.6 : 4.5;
       const bobAmp = isTurning ? 0.032 : 0.014;
       const bob = Math.sin(elapsedSec * bobFreq + i * 0.7) * bobAmp;
@@ -2908,22 +2945,30 @@ export class Renderer3D {
     const gridH = this.currentGridH || 6;
 
     if (this.layoutMode === 'wide') {
-      const worldLeftX = -14.8;
-      const worldRightX = WIDE_LOT_LEFT_EDGE_X + gridW * CELL_SIZE + 1.8;
-      const totalWidthX = worldRightX - worldLeftX;
-      const lookX = (worldLeftX + worldRightX) * 0.5 + 0.2;
+      // TV Wide Mode 30% / 10% / 60% Horizontal Allocation:
+      // - Zone 1 (Left Passenger Queue) + Zone 2 (Middle Parking Bays) sit left of z2RightBoundaryX (-1.05) = 40% (30% Z1 + 10% Z2)
+      // - Zone 3 (Right Vehicle Puzzle Lot) sits right of z2RightBoundaryX (-1.05) = 60% of horizontal width
+      const z2RightBoundaryX = -1.05;
+      const rawZone3RightX = WIDE_LOT_LEFT_EDGE_X + gridW * CELL_SIZE + 1.35;
+      const zone3Width = Math.max(15.6, rawZone3RightX - z2RightBoundaryX);
+      const zone12Width = zone3Width * (40 / 60); // 30% Zone 1 + 10% Zone 2 = 40%
 
-      const worldTopZ = -Math.max(8.2, (gridH * CELL_SIZE) * 0.5 + 2.4);
-      const worldBottomZ = Math.max(8.2, (gridH * CELL_SIZE) * 0.5 + 2.6);
+      const worldLeftX = z2RightBoundaryX - zone12Width;
+      const worldRightX = z2RightBoundaryX + zone3Width;
+      const totalWidthX = worldRightX - worldLeftX;
+      const lookX = (worldLeftX + worldRightX) * 0.5;
+
+      const worldTopZ = -Math.max(8.0, (gridH * CELL_SIZE) * 0.5 + 2.2);
+      const worldBottomZ = Math.max(8.0, (gridH * CELL_SIZE) * 0.5 + 2.4);
       const totalDepthZ = worldBottomZ - worldTopZ;
-      const lookZ = 0.25;
+      const lookZ = 0.2;
 
       const vFovRad = THREE.MathUtils.degToRad(this.camera.fov);
       const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * aspect);
 
-      const distForWidth = (totalWidthX * 0.54) / Math.tan(hFovRad / 2);
-      const distForDepth = (totalDepthZ * 0.64) / Math.tan(vFovRad / 2);
-      const camDist = Math.max(24.5, distForWidth, distForDepth);
+      const distForWidth = (totalWidthX * 0.52) / Math.tan(hFovRad / 2);
+      const distForDepth = (totalDepthZ * 0.62) / Math.tan(vFovRad / 2);
+      const camDist = Math.max(23.5, distForWidth, distForDepth);
 
       const camHeight = camDist * 0.86;
       const camZ = lookZ + camDist * 0.51;

@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for the 100-Station City Route Saga Map (TV horizontal & mobile vertical), 10 progressive gameplay mechanics (1 introduced every 10 levels, max 1 per level), 4 detailed 3D vehicle types (Taxi 3, Minibus 15, Bus 25, Double Bus 40), 3D overhead flipped selection arrow, and strict Door-Gate-only passenger boarding with a high-contrast door ground pad.",
-  "updatedAt":  "2026-10-21T16:03:34.664143245Z",
+  "summary":  "Implementation plan for TV Wide Mode 30% / 10% / 60% zone proportions with reduced Zone 1-to-Zone 2 distance, plus the sharp Level 4+ puzzle challenge overhaul featuring deep interlocking blocker chains hiding target-color vehicles and dense 12–24 vehicle grids.",
+  "updatedAt":  "2026-10-23T11:22:06.004806160Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

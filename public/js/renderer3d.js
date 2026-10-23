@@ -216,7 +216,7 @@ export class Renderer3D {
     this.worldGroup.add(this.runnersGroup);
 
     // Pre-allocated 3D Passenger Pool (for turning loop circle + waiting feeder line + runners)
-    this.maxVisibleQueuePassengers = 240;
+    this.maxVisibleQueuePassengers = 320;
     this.loopCapacityRows = 24; // 24 rows * 5 abreast = 120 passengers turning inside the oval circle
     this.queuePassengerNodes = [];
     this.runnerPool = [];
@@ -226,8 +226,11 @@ export class Renderer3D {
     this.busActors = new Map();
     this.focusedBusId = null;
     this.focusRingMesh = null;
+    this.focusArrowGroup = null;
     this.focusedBayIndex = -1;
     this.bayFocusMesh = null;
+    this.doorGroundPadMat = null;
+    this.doorBeaconMat = null;
 
     // Zone A Curves: Closed Turning Loop Circle + Stationary Top-Right Feeder Waiting Line
     this.loopCurve = null;
@@ -658,11 +661,113 @@ export class Renderer3D {
     this.zoneAGroup.add(islandCenterMesh);
 
     // Gate opening dark stone connector at bottom center of loop
-    const gateConnectorGeo = new THREE.PlaneGeometry(2.5, 1.1);
+    const gateConnectorGeo = new THREE.PlaneGeometry(2.7, 1.35);
     const gateConnector = new THREE.Mesh(gateConnectorGeo, this.walkwayPathMat);
     gateConnector.rotation.x = -Math.PI / 2;
-    gateConnector.position.set(0, 0.145, -5.45);
+    gateConnector.position.set(0, 0.142, -5.52);
     this.zoneAGroup.add(gateConnector);
+
+    // High-Contrast Distinctive Boarding Door Ground Pad (Neon Emerald + Gold Chevron Platform)
+    // Positioned right where the revolving passenger circle passes uLoop = 0 (x = 0, z = -6.15)
+    const doorPadTex = this._createDoorGroundPadTexture();
+    this.doorGroundPadMat = new THREE.MeshBasicMaterial({
+      map: doorPadTex,
+      transparent: true,
+      opacity: 0.98,
+      depthWrite: false,
+    });
+    const doorPadMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.68, 1.48),
+      this.doorGroundPadMat
+    );
+    doorPadMesh.rotation.x = -Math.PI / 2;
+    doorPadMesh.position.set(0, 0.156, -6.15);
+    this.zoneAGroup.add(doorPadMesh);
+
+    // Flanking Illuminated Boarding Door Gate Pillars (Left & Right of Door Ground Pad)
+    const pillarMat = new THREE.MeshLambertMaterial({ color: 0x0f172a });
+    const collarMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+    this.doorBeaconMat = new THREE.MeshBasicMaterial({ color: 0x10b981 });
+
+    [-1.42, 1.42].forEach((px) => {
+      const pillarGroup = new THREE.Group();
+      pillarGroup.position.set(px, 0.14, -5.85);
+
+      const base = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.1, 0.28), collarMat);
+      base.position.y = 0.05;
+      pillarGroup.add(base);
+
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.09, 0.72, 10), pillarMat);
+      post.position.y = 0.42;
+      pillarGroup.add(post);
+
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), this.doorBeaconMat);
+      beacon.position.y = 0.84;
+      pillarGroup.add(beacon);
+
+      this.zoneAGroup.add(pillarGroup);
+    });
+  }
+
+  /**
+   * Creates a very distinctive, high-contrast Neon Emerald & Gold Checkered Boarding Door Ground Pad texture
+   * so players immediately see the exact door zone where circling passengers can board buses.
+   */
+  _createDoorGroundPadTexture() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+
+    // Deep emerald-black base with glowing neon border
+    ctx.fillStyle = '#052e16';
+    ctx.fillRect(8, 8, 496, 240);
+
+    // Bold gold & neon-emerald hazard chevron border along top and bottom
+    const stripeW = 32;
+    for (let x = -256; x < 512; x += stripeW) {
+      ctx.fillStyle = (Math.floor(x / stripeW) % 2 === 0) ? '#facc15' : '#10b981';
+      ctx.beginPath();
+      ctx.moveTo(x, 8);
+      ctx.lineTo(x + stripeW, 8);
+      ctx.lineTo(x + stripeW + 24, 38);
+      ctx.lineTo(x + 24, 38);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.moveTo(x, 248);
+      ctx.lineTo(x + stripeW, 248);
+      ctx.lineTo(x + stripeW - 24, 218);
+      ctx.lineTo(x - 24, 218);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // Vibrant emerald center mat
+    const grad = ctx.createLinearGradient(0, 40, 0, 216);
+    grad.addColorStop(0, '#047857');
+    grad.addColorStop(0.5, '#10b981');
+    grad.addColorStop(1, '#047857');
+    ctx.fillStyle = grad;
+    ctx.fillRect(20, 42, 472, 172);
+
+    // Crisp outer neon frame
+    ctx.strokeStyle = '#fef08a';
+    ctx.lineWidth = 8;
+    ctx.strokeRect(12, 12, 488, 232);
+
+    // Downward boarding chevrons + "BOARDING DOOR" stencil
+    ctx.fillStyle = '#fef08a';
+    ctx.font = '900 44px "Plus Jakarta Sans", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('▼ BOARDING DOOR ▼', 256, 128);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.needsUpdate = true;
+    return tex;
   }
 
   /**
@@ -1126,7 +1231,7 @@ export class Renderer3D {
       this.queuePassengerNodes.push(node);
     }
 
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < 36; i++) {
       const node = createPassengerNode();
       this.runnersGroup.add(node.group);
       this.runnerPool.push(node);
@@ -1157,7 +1262,9 @@ export class Renderer3D {
   }
 
   /**
-   * Builds the high-contrast 3D selection rings for TV Remote & Gamepad focus (Bus Grid + Parking Bays).
+   * Builds the high-contrast 3D selection rings AND the overhead Flipped Arrow (▼)
+   * for TV Remote & Gamepad focus (Bus Grid + Parking Bays).
+   * The overhead flipped arrow stays clearly visible even when a vehicle is surrounded by tall buses.
    */
   _buildSelectionRings() {
     const focusGroup = new THREE.Group();
@@ -1188,6 +1295,36 @@ export class Renderer3D {
     focusGroup.visible = false;
     this.focusRingMesh = focusGroup;
     this.zoneCGroup.add(this.focusRingMesh);
+
+    // Overhead 3D Flipped Downward-Pointing Pointer Arrow (▼) above the selected vehicle
+    const arrowGroup = new THREE.Group();
+    const arrowGoldMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+    const arrowCyanMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+
+    // Downward cone tip (flipped 180 deg so apex points straight down at the vehicle roof)
+    const tipGeo = new THREE.ConeGeometry(0.42, 0.56, 4);
+    tipGeo.rotateX(Math.PI);
+    const tipMesh = new THREE.Mesh(tipGeo, arrowGoldMat);
+    tipMesh.position.y = 0.28;
+    arrowGroup.add(tipMesh);
+
+    // Upper vertical stem of the flipped arrow
+    const stemGeo = new THREE.BoxGeometry(0.22, 0.44, 0.22);
+    const stemMesh = new THREE.Mesh(stemGeo, arrowGoldMat);
+    stemMesh.position.y = 0.72;
+    arrowGroup.add(stemMesh);
+
+    // Glowing cyan collar ring around the arrow
+    const collarGeo = new THREE.TorusGeometry(0.34, 0.055, 8, 24);
+    collarGeo.rotateX(Math.PI / 2);
+    const collarMesh = new THREE.Mesh(collarGeo, arrowCyanMat);
+    collarMesh.position.y = 0.52;
+    arrowGroup.add(collarMesh);
+
+    arrowGroup.position.y = 1.85;
+    arrowGroup.visible = false;
+    this.focusArrowGroup = arrowGroup;
+    this.zoneCGroup.add(this.focusArrowGroup);
 
     // 3D Bay Focus Frame for unlocking '+' bays with TV Remote / Gamepad
     const bayFrameGeo = new THREE.RingGeometry(0.88, 1.12, 4);
@@ -1245,7 +1382,6 @@ export class Renderer3D {
     this.currentGridOriginX = getDynamicGridOriginX(gridW, this.layoutMode);
     this.currentGridOriginZ = this.layoutMode === 'wide' ? 0 : getDynamicGridOriginZ(gridH);
 
-    // Textured dark basalt stone paver pad beneath the grid with recessed cell borders
     if (this.lotPadMesh) {
       this.zoneCGroup.remove(this.lotPadMesh);
       if (this.lotPadMat?.map) this.lotPadMat.map.dispose();
@@ -1257,7 +1393,6 @@ export class Renderer3D {
     const padW = gridW * CELL_SIZE;
     const padH = gridH * CELL_SIZE;
 
-    // Outer dark steel curb framing the puzzle grid
     const rimGeo = new THREE.BoxGeometry(padW + 0.55, 0.06, padH + 0.55);
     const rimMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
     this.lotRimMesh = new THREE.Mesh(rimGeo, rimMat);
@@ -1277,47 +1412,62 @@ export class Renderer3D {
     this.zoneCGroup.add(this.lotPadMesh);
 
     for (let i = 0; i < stage.buses.length; i++) {
-      const busData = stage.buses[i];
-      const posInfo = getBusWorldCenter(
-        busData,
-        gridW,
-        gridH,
-        this.currentGridOriginZ,
-        this.currentGridOriginX
-      );
-      const busGroup = this._createCompositeBusMesh(busData);
-
-      busGroup.position.set(posInfo.worldX, 0, posInfo.worldZ);
-      busGroup.rotation.y = posInfo.rotY;
-
-      this.zoneCGroup.add(busGroup);
-
-      this.busActors.set(busData.id, {
-        id: busData.id,
-        data: busData,
-        group: busGroup,
-        state: 'grid',
-        baseX: posInfo.worldX,
-        baseZ: posInfo.worldZ,
-        baseRotY: posInfo.rotY,
-        bumpTimer: 0,
-        shakeTimer: 0,
-        waypoints: [],
-        waypointIdx: 0,
-        bayIndex: -1,
-        remainingCapacity: busData.capacity,
-        boardedCount: 0,
-        bounceTimer: 0,
-      });
+      this._spawnSingleBusActor(stage.buses[i], gridW, gridH);
     }
 
-    // Automatically re-frame camera zoom to fit the current stage's grid dimensions
     this.resize();
   }
 
+  _spawnSingleBusActor(busData, gridW = this.currentGridW, gridH = this.currentGridH) {
+    const posInfo = getBusWorldCenter(
+      busData,
+      gridW,
+      gridH,
+      this.currentGridOriginZ,
+      this.currentGridOriginX
+    );
+    const busGroup = this._createCompositeBusMesh(busData);
+
+    busGroup.position.set(posInfo.worldX, 0, posInfo.worldZ);
+    busGroup.rotation.y = posInfo.rotY;
+
+    this.zoneCGroup.add(busGroup);
+
+    const actor = {
+      id: busData.id,
+      data: busData,
+      group: busGroup,
+      state: 'grid',
+      baseX: posInfo.worldX,
+      baseZ: posInfo.worldZ,
+      baseRotY: posInfo.rotY,
+      roofHeight: busGroup.userData?.roofHeight || 0.96,
+      bumpTimer: 0,
+      shakeTimer: 0,
+      waypoints: [],
+      waypointIdx: 0,
+      bayIndex: -1,
+      remainingCapacity: busData.capacity,
+      boardedCount: 0,
+      bounceTimer: 0,
+    };
+    this.busActors.set(busData.id, actor);
+    this.syncBusMechanicState(busData.id);
+    return actor;
+  }
+
   /**
-   * Dynamically recolors an existing 3D bus actor (used by the 1-button Dock-Full Continue
-   * to change the last parked bus's color to match the front waiting passenger color).
+   * Spawns the reserve vehicle from an Underground Tunnel ('tunnel_spawner') onto the grid.
+   */
+  spawnTunnelReserveBus(busData) {
+    const actor = this._spawnSingleBusActor(busData, this.currentGridW, this.currentGridH);
+    actor.bounceTimer = 0.25;
+    return actor;
+  }
+
+  /**
+   * Dynamically recolors an existing 3D bus actor (used by 1-button Dock-Full Continue
+   * and Dual-Color Coach mid-boarding color transition).
    */
   recolorBusActor(busId, newColorName) {
     const actor = this.busActors.get(busId);
@@ -1331,6 +1481,10 @@ export class Renderer3D {
       actor.group.userData.bodyMat.color.setHex(palette.main);
       actor.group.userData.bodyMat.emissive.setHex(palette.dark);
     }
+    if (actor.group.userData?.rearBodyMat) {
+      actor.group.userData.rearBodyMat.color.setHex(palette.main);
+      actor.group.userData.rearBodyMat.emissive.setHex(palette.dark);
+    }
     if (actor.group.userData?.roofCapMat) {
       actor.group.userData.roofCapMat.color.setHex(palette.light);
       actor.group.userData.roofCapMat.emissive.setHex(palette.main);
@@ -1340,13 +1494,96 @@ export class Renderer3D {
   }
 
   /**
-   * Builds a composite 11-part 3D vehicle mesh (minivan, bus, or coach) with night headlight beams.
+   * Synchronizes the 3D mechanic attachments on a vehicle with its live `bus.mechanicState`.
+   */
+  syncBusMechanicState(busId) {
+    const actor = this.busActors.get(busId);
+    if (!actor) return;
+    const bus = actor.data;
+    const ud = actor.group.userData || {};
+    const st = bus.mechanicState || {};
+
+    if (bus.mechanic === 'mystery_tint') {
+      const revealed = Boolean(st.revealed);
+      const palette = COLOR_PALETTE_HEX[bus.color] || COLOR_PALETTE_HEX.purple;
+      if (ud.bodyMat) {
+        ud.bodyMat.color.setHex(revealed ? palette.main : 0x1e293b);
+        ud.bodyMat.emissive.setHex(revealed ? palette.dark : 0x0f172a);
+      }
+      if (ud.roofCapMat) {
+        ud.roofCapMat.color.setHex(revealed ? palette.light : 0x334155);
+      }
+      if (ud.mysteryGroup) {
+        ud.mysteryGroup.visible = !revealed;
+      }
+    } else if (bus.mechanic === 'traffic_light') {
+      const isGreen = st.green !== false;
+      if (ud.signalGreenMat) {
+        ud.signalGreenMat.color.setHex(isGreen ? 0x22c55e : 0x14532d);
+      }
+      if (ud.signalRedMat) {
+        ud.signalRedMat.color.setHex(!isGreen ? 0xef4444 : 0x450a0a);
+      }
+    } else if (bus.mechanic === 'vip_rope') {
+      const rem = st.ropesRemaining ?? 0;
+      if (ud.ropeGroup) {
+        ud.ropeGroup.visible = rem > 0;
+      }
+    } else if (bus.mechanic === 'sleeping_driver') {
+      const awake = Boolean(st.awake);
+      if (ud.zzzGroup) {
+        ud.zzzGroup.visible = !awake;
+      }
+    } else if (bus.mechanic === 'direction_flipper') {
+      const posInfo = getBusWorldCenter(
+        bus,
+        this.currentGridW,
+        this.currentGridH,
+        this.currentGridOriginZ,
+        this.currentGridOriginX
+      );
+      actor.baseX = posInfo.worldX;
+      actor.baseZ = posInfo.worldZ;
+      actor.baseRotY = posInfo.rotY;
+      if (actor.state === 'grid') {
+        actor.group.position.set(posInfo.worldX, 0, posInfo.worldZ);
+        actor.group.rotation.y = posInfo.rotY;
+      }
+    } else if (bus.mechanic === 'express_bonus') {
+      if (ud.expressGroup) {
+        ud.expressGroup.visible = (st.movesRemaining ?? 0) > 0 && actor.state === 'grid';
+      }
+    } else if (bus.mechanic === 'lift_barrier') {
+      if (ud.barrierArm) {
+        ud.barrierArm.rotation.z = st.gateOpen ? Math.PI * 0.44 : 0;
+      }
+    }
+  }
+
+  /**
+   * Builds a rich, detailed multi-part 3D vehicle mesh for the 4 vehicle classes:
+   * 1. 'taxi'       (capacity: 3,  length: 2) — Sedan with hood, trunk, cabin greenhouse, checkered stripe & TAXI sign
+   * 2. 'minibus'    (capacity: 15, length: 2) — High-roof shuttle van with panoramic windows, sliding door & roof AC
+   * 3. 'bus'        (capacity: 25, length: 3) — Full-size city transit coach with LED route header, 5 window bays & 6 wheels
+   * 4. 'double_bus' (capacity: 40, length: 3) — Towering double-decker bus with lower/upper decks, beltline & 6 wheels
    */
   _createCompositeBusMesh(busData) {
-    const L = busData.length || 2;
+    const vType = busData.type || 'bus';
+    const L = busData.length || (vType === 'bus' || vType === 'double_bus' ? 3 : 2);
     const { meshWidth, meshLength } = getBusMeshDimensions(L);
     const palette = COLOR_PALETTE_HEX[busData.color] || COLOR_PALETTE_HEX.purple;
-    const meshHeight = busData.type === 'coach' ? 0.94 : busData.type === 'minivan' ? 0.78 : 0.86;
+    const secondaryPalette = busData.secondaryColor
+      ? COLOR_PALETTE_HEX[busData.secondaryColor] || palette
+      : null;
+
+    const meshHeight =
+      vType === 'double_bus'
+        ? 1.44
+        : vType === 'bus'
+        ? 0.98
+        : vType === 'minibus'
+        ? 0.86
+        : 0.68; // taxi
 
     const group = new THREE.Group();
 
@@ -1363,65 +1600,307 @@ export class Renderer3D {
     shadowMesh.position.y = 0.018;
     group.add(shadowMesh);
 
-    // 2. Lower darker chassis skirt / bumper
-    const chassisGeo = new THREE.BoxGeometry(meshWidth * 0.98, 0.22, meshLength * 0.98);
+    // 2. Lower darker chassis skirt / heavy bumpers
+    const chassisGeo = new THREE.BoxGeometry(meshWidth * 1.0, 0.22, meshLength * 0.99);
     const chassisMat = new THREE.MeshLambertMaterial({ color: palette.dark });
     const chassisMesh = new THREE.Mesh(chassisGeo, chassisMat);
-    chassisMesh.position.y = 0.2;
+    chassisMesh.position.y = 0.19;
     group.add(chassisMesh);
 
-    // 3. Main glossy body hull
-    const bodyGeo = new THREE.BoxGeometry(meshWidth, meshHeight - 0.2, meshLength * 0.95);
+    // Front & Rear metallic bumper bars
+    const bumperMat = new THREE.MeshLambertMaterial({ color: 0x1e293b });
+    const frontBumper = new THREE.Mesh(
+      new THREE.BoxGeometry(meshWidth * 1.02, 0.12, 0.08),
+      bumperMat
+    );
+    frontBumper.position.set(0, 0.17, -meshLength * 0.49);
+    group.add(frontBumper);
+
+    const rearBumper = new THREE.Mesh(
+      new THREE.BoxGeometry(meshWidth * 1.02, 0.12, 0.08),
+      bumperMat
+    );
+    rearBumper.position.set(0, 0.17, meshLength * 0.49);
+    group.add(rearBumper);
+
+    // Shared materials
     const bodyMat = new THREE.MeshPhongMaterial({
       color: palette.main,
       emissive: palette.dark,
-      emissiveIntensity: 0.14,
-      specular: 0x777777,
-      shininess: 60,
+      emissiveIntensity: 0.15,
+      specular: 0x888888,
+      shininess: 64,
     });
-    const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
-    bodyMesh.position.y = 0.22 + (meshHeight - 0.2) / 2;
-    group.add(bodyMesh);
+    let rearBodyMat = null;
+    if (busData.mechanic === 'dual_color' && secondaryPalette) {
+      rearBodyMat = new THREE.MeshPhongMaterial({
+        color: secondaryPalette.main,
+        emissive: secondaryPalette.dark,
+        emissiveIntensity: 0.15,
+        specular: 0x888888,
+        shininess: 64,
+      });
+    }
 
-    // 4. Rounded roof cap
-    const roofCapGeo = new THREE.BoxGeometry(meshWidth * 0.88, 0.1, meshLength * 0.88);
     const roofCapMat = new THREE.MeshPhongMaterial({
       color: palette.light,
       emissive: palette.main,
       emissiveIntensity: 0.1,
-      specular: 0x888888,
-      shininess: 68,
+      specular: 0x999999,
+      shininess: 70,
     });
-    const roofCapMesh = new THREE.Mesh(roofCapGeo, roofCapMat);
-    roofCapMesh.position.y = meshHeight + 0.04;
-    group.add(roofCapMesh);
 
-    group.userData = {
-      chassisMat,
-      bodyMat,
-      roofCapMat,
-    };
-
-    // 5. Dark front windshield (at -Z local forward edge)
     const glassMat = new THREE.MeshPhongMaterial({
       color: 0x0f172a,
       emissive: 0x1e293b,
-      emissiveIntensity: 0.25,
+      emissiveIntensity: 0.28,
       specular: 0xbae6fd,
-      shininess: 95,
+      shininess: 98,
     });
-    const windshieldGeo = new THREE.BoxGeometry(meshWidth * 0.84, meshHeight * 0.36, 0.08);
-    const windshieldMesh = new THREE.Mesh(windshieldGeo, glassMat);
-    windshieldMesh.position.set(0, meshHeight * 0.66, -meshLength * 0.46);
-    group.add(windshieldMesh);
 
-    // 6. Side passenger windows strip
-    const sideWinGeo = new THREE.BoxGeometry(meshWidth * 1.015, meshHeight * 0.3, meshLength * 0.68);
-    const sideWinMesh = new THREE.Mesh(sideWinGeo, glassMat);
-    sideWinMesh.position.set(0, meshHeight * 0.66, 0.04);
-    group.add(sideWinMesh);
+    const trimMat = new THREE.MeshLambertMaterial({ color: 0xe2e8f0 });
+    const goldTrimMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
 
-    // 7. Front headlights & rear brake lights
+    // 3. Vehicle Class-Specific Bodywork & Detailing
+    if (vType === 'taxi') {
+      // TAXI (Capacity 3): Sleek 3-Box Sedan with Hood, Cabin Greenhouse, Trunk, Side Checkers & Glowing TAXI Sign
+      const lowerHullGeo = new THREE.BoxGeometry(meshWidth * 0.98, 0.26, meshLength * 0.95);
+      const lowerHull = new THREE.Mesh(lowerHullGeo, bodyMat);
+      lowerHull.position.y = 0.34;
+      group.add(lowerHull);
+
+      // Cabin greenhouse (centered slightly rear of front hood)
+      const cabinLen = meshLength * 0.54;
+      const cabinGeo = new THREE.BoxGeometry(meshWidth * 0.86, 0.25, cabinLen);
+      const cabinMesh = new THREE.Mesh(cabinGeo, roofCapMat);
+      cabinMesh.position.set(0, 0.56, 0.04);
+      group.add(cabinMesh);
+
+      // Front & rear sloped windshields + side cabin windows
+      const taxiWindshield = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.78, 0.21, 0.07),
+        glassMat
+      );
+      taxiWindshield.position.set(0, 0.56, 0.04 - cabinLen * 0.49);
+      group.add(taxiWindshield);
+
+      const taxiRearGlass = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.76, 0.2, 0.07),
+        glassMat
+      );
+      taxiRearGlass.position.set(0, 0.56, 0.04 + cabinLen * 0.49);
+      group.add(taxiRearGlass);
+
+      const taxiSideGlass = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.89, 0.19, cabinLen * 0.82),
+        glassMat
+      );
+      taxiSideGlass.position.set(0, 0.56, 0.04);
+      group.add(taxiSideGlass);
+
+      // Iconic Yellow Checkered Taxi Side Trim Band
+      const taxiStripe = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.01, 0.055, meshLength * 0.88),
+        goldTrimMat
+      );
+      taxiStripe.position.set(0, 0.36, 0);
+      group.add(taxiStripe);
+
+      // Illuminated Yellow 'TAXI' Roof Light Box
+      const signBase = new THREE.Mesh(
+        new THREE.BoxGeometry(0.46, 0.13, 0.22),
+        goldTrimMat
+      );
+      signBase.position.set(0, meshHeight + 0.06, -0.05);
+      group.add(signBase);
+    } else if (vType === 'double_bus') {
+      // DOUBLE BUS (Capacity 40): Towering Two-Deck Coach with Lower & Upper Window Bays + Gold Mid-Deck Beltline
+      const hullH = meshHeight - 0.22;
+      if (rearBodyMat) {
+        const frontHalf = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth, hullH, meshLength * 0.475),
+          bodyMat
+        );
+        frontHalf.position.set(0, 0.22 + hullH / 2, -meshLength * 0.238);
+        group.add(frontHalf);
+
+        const rearHalf = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth, hullH, meshLength * 0.475),
+          rearBodyMat
+        );
+        rearHalf.position.set(0, 0.22 + hullH / 2, meshLength * 0.238);
+        group.add(rearHalf);
+      } else {
+        const bodyMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth, hullH, meshLength * 0.95),
+          bodyMat
+        );
+        bodyMesh.position.y = 0.22 + hullH / 2;
+        group.add(bodyMesh);
+      }
+
+      // Rounded upper roof cap
+      const roofCapMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.9, 0.09, meshLength * 0.9),
+        roofCapMat
+      );
+      roofCapMesh.position.y = meshHeight + 0.035;
+      group.add(roofCapMesh);
+
+      // Lower-deck front windshield & side windows
+      const lowerWindshield = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.86, 0.32, 0.08),
+        glassMat
+      );
+      lowerWindshield.position.set(0, 0.56, -meshLength * 0.46);
+      group.add(lowerWindshield);
+
+      const lowerSideWin = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.018, 0.28, meshLength * 0.78),
+        glassMat
+      );
+      lowerSideWin.position.set(0, 0.56, 0.02);
+      group.add(lowerSideWin);
+
+      // Mid-deck cream/gold separation beltline
+      const midBelt = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.025, 0.065, meshLength * 0.96),
+        goldTrimMat
+      );
+      midBelt.position.set(0, 0.84, 0);
+      group.add(midBelt);
+
+      // Upper-deck panoramic front observation window & side windows
+      const upperWindshield = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.86, 0.32, 0.08),
+        glassMat
+      );
+      upperWindshield.position.set(0, 1.16, -meshLength * 0.46);
+      group.add(upperWindshield);
+
+      const upperSideWin = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.018, 0.3, meshLength * 0.82),
+        glassMat
+      );
+      upperSideWin.position.set(0, 1.16, 0);
+      group.add(upperSideWin);
+
+      // Vertical window mullions for realistic multi-bay double-decker look
+      for (let m = -2; m <= 2; m++) {
+        const pillar = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth * 1.03, hullH * 0.86, 0.06),
+          bodyMat
+        );
+        pillar.position.set(0, 0.24 + hullH * 0.43, m * (meshLength * 0.16));
+        group.add(pillar);
+      }
+
+      // Twin rooftop HVAC pods
+      [-0.75, 0.75].forEach((oz) => {
+        const acPod = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth * 0.54, 0.08, 0.48),
+          trimMat
+        );
+        acPod.position.set(0, meshHeight + 0.09, oz);
+        group.add(acPod);
+      });
+    } else {
+      // MINIBUS (Capacity 15, Length 2) & CITY BUS (Capacity 25, Length 3)
+      const hullH = meshHeight - 0.2;
+      if (rearBodyMat) {
+        const frontHalf = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth, hullH, meshLength * 0.475),
+          bodyMat
+        );
+        frontHalf.position.set(0, 0.22 + hullH / 2, -meshLength * 0.238);
+        group.add(frontHalf);
+
+        const rearHalf = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth, hullH, meshLength * 0.475),
+          rearBodyMat
+        );
+        rearHalf.position.set(0, 0.22 + hullH / 2, meshLength * 0.238);
+        group.add(rearHalf);
+      } else {
+        const bodyMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth, hullH, meshLength * 0.95),
+          bodyMat
+        );
+        bodyMesh.position.y = 0.22 + hullH / 2;
+        group.add(bodyMesh);
+      }
+
+      const roofCapMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.88, 0.1, meshLength * 0.88),
+        roofCapMat
+      );
+      roofCapMesh.position.y = meshHeight + 0.04;
+      group.add(roofCapMesh);
+
+      // Front windshield + side windows
+      const windshieldMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.84, meshHeight * 0.36, 0.08),
+        glassMat
+      );
+      windshieldMesh.position.set(0, meshHeight * 0.66, -meshLength * 0.46);
+      group.add(windshieldMesh);
+
+      const sideWinMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.015, meshHeight * 0.32, meshLength * 0.74),
+        glassMat
+      );
+      sideWinMesh.position.set(0, meshHeight * 0.66, 0.03);
+      group.add(sideWinMesh);
+
+      // Metallic beltline side trim + window pillars + rooftop AC pod
+      const sideBelt = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.02, 0.045, meshLength * 0.92),
+        trimMat
+      );
+      sideBelt.position.set(0, 0.42, 0);
+      group.add(sideBelt);
+
+      const pillarCount = vType === 'bus' ? 4 : 2;
+      for (let p = 0; p < pillarCount; p++) {
+        const pz = ((p - (pillarCount - 1) / 2) * (meshLength * 0.62)) / Math.max(1, pillarCount - 1);
+        const pillar = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth * 1.025, meshHeight * 0.34, 0.055),
+          bodyMat
+        );
+        pillar.position.set(0, meshHeight * 0.66, pz);
+        group.add(pillar);
+      }
+
+      // Rooftop HVAC unit(s)
+      const acPod = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.56, 0.09, vType === 'bus' ? 0.68 : 0.46),
+        trimMat
+      );
+      acPod.position.set(0, meshHeight + 0.09, -meshLength * 0.18);
+      group.add(acPod);
+
+      if (vType === 'bus') {
+        // Illuminated LED Route Header Board above front windshield
+        const routeBoard = new THREE.Mesh(
+          new THREE.BoxGeometry(meshWidth * 0.64, 0.09, 0.06),
+          goldTrimMat
+        );
+        routeBoard.position.set(0, meshHeight * 0.9, -meshLength * 0.47);
+        group.add(routeBoard);
+      }
+    }
+
+    // Side Mirrors (Left & Right at front cab)
+    [-1, 1].forEach((side) => {
+      const mirror = new THREE.Mesh(
+        new THREE.BoxGeometry(0.09, 0.12, 0.08),
+        bumperMat
+      );
+      mirror.position.set(side * (meshWidth * 0.54), meshHeight * 0.58, -meshLength * 0.42);
+      group.add(mirror);
+    });
+
+    // Front headlights & rear brake lights
     const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
     const taillightMat = new THREE.MeshBasicMaterial({ color: 0xf87171 });
     const lightGeo = new THREE.BoxGeometry(0.18, 0.1, 0.06);
@@ -1434,7 +1913,7 @@ export class Renderer3D {
     hlRight.position.set(meshWidth * 0.3, 0.28, -meshLength * 0.475);
     group.add(hlRight);
 
-    // 7b. Dynamic Sunset/Night Headlight Floor Beams (projecting forward in -Z)
+    // Dynamic Sunset/Night Headlight Floor Beams (projecting forward in -Z)
     const beamConeMat = new THREE.MeshBasicMaterial({
       color: 0xfef08a,
       transparent: true,
@@ -1457,26 +1936,34 @@ export class Renderer3D {
     tlRight.position.set(meshWidth * 0.3, 0.28, meshLength * 0.475);
     group.add(tlRight);
 
-    // 8. 4 Black Wheels
+    // Wheels (4 wheels for L=2 taxi/minibus, 6 wheels with dual rear axles for L=3 bus/double_bus)
     const wheelGeo = new THREE.CylinderGeometry(0.19, 0.19, 0.14, 12);
     wheelGeo.rotateZ(Math.PI / 2);
     const wheelMat = new THREE.MeshLambertMaterial({ color: 0x090d16 });
-    const wheelZOffset = meshLength * 0.29;
-    const wheelXOffset = meshWidth * 0.48;
-    const wheelPositions = [
-      [-wheelXOffset, 0.19, -wheelZOffset],
-      [wheelXOffset, 0.19, -wheelZOffset],
-      [-wheelXOffset, 0.19, wheelZOffset],
-      [wheelXOffset, 0.19, wheelZOffset],
-    ];
-    for (let w = 0; w < wheelPositions.length; w++) {
-      const wheel = new THREE.Mesh(wheelGeo, wheelMat);
-      wheel.position.set(...wheelPositions[w]);
-      group.add(wheel);
+    const hubGeo = new THREE.CylinderGeometry(0.09, 0.09, 0.15, 8);
+    hubGeo.rotateZ(Math.PI / 2);
+
+    const wheelXOffset = meshWidth * 0.49;
+    const zOffsets =
+      L >= 3
+        ? [-meshLength * 0.32, meshLength * 0.16, meshLength * 0.34]
+        : [-meshLength * 0.29, meshLength * 0.29];
+
+    for (let zIdx = 0; zIdx < zOffsets.length; zIdx++) {
+      const wz = zOffsets[zIdx];
+      [-wheelXOffset, wheelXOffset].forEach((wx) => {
+        const wheel = new THREE.Mesh(wheelGeo, wheelMat);
+        wheel.position.set(wx, 0.19, wz);
+        group.add(wheel);
+
+        const hub = new THREE.Mesh(hubGeo, trimMat);
+        hub.position.set(wx, 0.19, wz);
+        group.add(hub);
+      });
     }
 
-    // 9. High-contrast Directional Arrow on the roof (points -Z in local bus space)
-    const arrowPlaneGeo = new THREE.PlaneGeometry(meshWidth * 0.72, meshWidth * 0.92);
+    // High-contrast Directional Arrow on the roof (points -Z in local bus space)
+    const arrowPlaneGeo = new THREE.PlaneGeometry(meshWidth * 0.68, meshWidth * 0.86);
     const arrowMat = new THREE.MeshBasicMaterial({
       map: this._getRoofArrowTexture(),
       transparent: true,
@@ -1484,21 +1971,187 @@ export class Renderer3D {
     });
     const arrowMesh = new THREE.Mesh(arrowPlaneGeo, arrowMat);
     arrowMesh.rotation.x = -Math.PI / 2;
-    arrowMesh.position.set(0, meshHeight + 0.095, 0);
+    arrowMesh.position.set(0, meshHeight + 0.098, 0.06);
     group.add(arrowMesh);
 
-    // 10. Invisible click proxy box for instant raycasting
-    const proxyGeo = new THREE.BoxGeometry(meshWidth * 1.05, meshHeight + 0.25, meshLength * 1.02);
+    group.userData = {
+      chassisMat,
+      bodyMat,
+      rearBodyMat,
+      roofCapMat,
+      roofHeight: meshHeight,
+    };
+
+    // Attach 3D Mechanic Prop if this vehicle carries the level's active mechanic
+    if (busData.mechanic) {
+      this._attachMechanic3DProps(group, busData, meshWidth, meshHeight, meshLength);
+    }
+
+    // Invisible click proxy box for instant raycasting
+    const proxyGeo = new THREE.BoxGeometry(meshWidth * 1.06, meshHeight + 0.35, meshLength * 1.04);
     const proxyMesh = new THREE.Mesh(
       proxyGeo,
       new THREE.MeshBasicMaterial({ visible: false })
     );
-    proxyMesh.position.y = (meshHeight + 0.2) / 2;
+    proxyMesh.position.y = (meshHeight + 0.25) / 2;
     proxyMesh.userData = { busId: busData.id };
     group.add(proxyMesh);
     this.busClickProxies.push(proxyMesh);
 
     return group;
+  }
+
+  /**
+   * Builds distinct 3D visual attachments for the 10 progressive stage mechanics.
+   */
+  _attachMechanic3DProps(group, busData, meshWidth, meshHeight, meshLength) {
+    const mech = busData.mechanic;
+    const ud = group.userData;
+
+    if (mech === 'mystery_tint') {
+      const mGroup = new THREE.Group();
+      const qBox = new THREE.Mesh(
+        new THREE.BoxGeometry(0.46, 0.46, 0.46),
+        new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+      );
+      qBox.position.set(0, meshHeight + 0.38, 0);
+      qBox.rotation.y = Math.PI / 4;
+      mGroup.add(qBox);
+      group.add(mGroup);
+      ud.mysteryGroup = mGroup;
+    } else if (mech === 'traffic_light') {
+      const sigGroup = new THREE.Group();
+      const box = new THREE.Mesh(
+        new THREE.BoxGeometry(0.32, 0.56, 0.26),
+        new THREE.MeshLambertMaterial({ color: 0x0f172a })
+      );
+      box.position.set(0, meshHeight + 0.36, -meshLength * 0.25);
+      sigGroup.add(box);
+
+      const redMat = new THREE.MeshBasicMaterial({ color: 0x450a0a });
+      const greenMat = new THREE.MeshBasicMaterial({ color: 0x22c55e });
+      const redSphere = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), redMat);
+      redSphere.position.set(0, meshHeight + 0.47, -meshLength * 0.25);
+      sigGroup.add(redSphere);
+
+      const greenSphere = new THREE.Mesh(new THREE.SphereGeometry(0.11, 10, 8), greenMat);
+      greenSphere.position.set(0, meshHeight + 0.25, -meshLength * 0.25);
+      sigGroup.add(greenSphere);
+
+      group.add(sigGroup);
+      ud.signalRedMat = redMat;
+      ud.signalGreenMat = greenMat;
+    } else if (mech === 'vip_rope') {
+      const ropeGroup = new THREE.Group();
+      const postMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+      const velvetMat = new THREE.MeshBasicMaterial({ color: 0xf43f5e });
+
+      [-meshWidth * 0.56, meshWidth * 0.56].forEach((rx) => {
+        [-meshLength * 0.42, meshLength * 0.42].forEach((rz) => {
+          const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.72, 8), postMat);
+          post.position.set(rx, 0.36, rz);
+          ropeGroup.add(post);
+        });
+      });
+
+      const frontRope = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.15, 0.08, 0.08),
+        velvetMat
+      );
+      frontRope.position.set(0, 0.62, -meshLength * 0.42);
+      ropeGroup.add(frontRope);
+
+      const topRope = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.06, 0.08, 0.14),
+        velvetMat
+      );
+      topRope.position.set(0, meshHeight + 0.14, 0);
+      ropeGroup.add(topRope);
+
+      group.add(ropeGroup);
+      ud.ropeGroup = ropeGroup;
+    } else if (mech === 'tunnel_spawner') {
+      const tunnelGroup = new THREE.Group();
+      const archMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
+      const glowMat = new THREE.MeshBasicMaterial({ color: 0x38bdf8 });
+
+      const archTop = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.24, 0.22, 0.44),
+        archMat
+      );
+      archTop.position.set(0, meshHeight + 0.18, meshLength * 0.46);
+      tunnelGroup.add(archTop);
+
+      const archGlow = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.1, 0.09, 0.48),
+        glowMat
+      );
+      archGlow.position.set(0, meshHeight + 0.31, meshLength * 0.46);
+      tunnelGroup.add(archGlow);
+
+      group.add(tunnelGroup);
+      ud.tunnelGroup = tunnelGroup;
+    } else if (mech === 'tow_truck') {
+      const beaconMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
+      const lightbar = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 0.72, 0.16, 0.24),
+        beaconMat
+      );
+      lightbar.position.set(0, meshHeight + 0.16, -0.15);
+      group.add(lightbar);
+
+      const boomArm = new THREE.Mesh(
+        new THREE.BoxGeometry(0.14, 0.14, 0.85),
+        new THREE.MeshLambertMaterial({ color: 0xca8a04 })
+      );
+      boomArm.position.set(0, meshHeight + 0.15, meshLength * 0.24);
+      boomArm.rotation.x = 0.45;
+      group.add(boomArm);
+      ud.towBeaconMat = beaconMat;
+    } else if (mech === 'sleeping_driver') {
+      const zzzGroup = new THREE.Group();
+      const pillow = new THREE.Mesh(
+        new THREE.BoxGeometry(0.52, 0.26, 0.32),
+        new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+      );
+      pillow.position.set(0, meshHeight + 0.34, -meshLength * 0.22);
+      zzzGroup.add(pillow);
+      group.add(zzzGroup);
+      ud.zzzGroup = zzzGroup;
+    } else if (mech === 'direction_flipper') {
+      const padMesh = new THREE.Mesh(
+        new THREE.RingGeometry(0.55, 0.78, 24),
+        new THREE.MeshBasicMaterial({
+          color: 0x38bdf8,
+          side: THREE.DoubleSide,
+        })
+      );
+      padMesh.rotation.x = -Math.PI / 2;
+      padMesh.position.y = 0.032;
+      group.add(padMesh);
+      ud.flipperPad = padMesh;
+    } else if (mech === 'express_bonus') {
+      const expGroup = new THREE.Group();
+      const crown = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.26, 0),
+        new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+      );
+      crown.position.set(0, meshHeight + 0.38, 0);
+      expGroup.add(crown);
+      group.add(expGroup);
+      ud.expressGroup = expGroup;
+    } else if (mech === 'lift_barrier') {
+      const barrierPivot = new THREE.Group();
+      barrierPivot.position.set(-meshWidth * 0.52, 0.52, -meshLength * 0.54);
+      const arm = new THREE.Mesh(
+        new THREE.BoxGeometry(meshWidth * 1.12, 0.12, 0.12),
+        new THREE.MeshBasicMaterial({ color: 0xfacc15 })
+      );
+      arm.position.set(meshWidth * 0.56, 0, 0);
+      barrierPivot.add(arm);
+      group.add(barrierPivot);
+      ud.barrierArm = barrierPivot;
+    }
   }
 
   _getRoofArrowTexture() {
@@ -1554,6 +2207,26 @@ export class Renderer3D {
   }
 
   /**
+   * Drives a 0-passenger service vehicle ('tow_truck') straight off the grid along its exit vector
+   * without occupying a parking bay.
+   */
+  triggerDirectServiceExit(busId, onGoneCallback) {
+    const actor = this.busActors.get(busId);
+    if (!actor) return;
+    actor.state = 'departing';
+    actor.onGone = onGoneCallback;
+    const vec = DIR_VECTORS[actor.data.dir] || DIR_VECTORS.N;
+    actor.waypoints = [
+      {
+        x: actor.group.position.x + vec.dx * 16.5,
+        z: actor.group.position.z + vec.dz * 16.5,
+        rotY: vec.rotY,
+      },
+    ];
+    actor.waypointIdx = 0;
+  }
+
+  /**
    * Triggers the Unblocked Bus Waypoint Drive-to-Bay Animation for both 'vertical' and 'wide' layouts.
    */
   triggerDriveToBay(busId, bayIndex, gridWidth, gridHeight) {
@@ -1574,7 +2247,6 @@ export class Renderer3D {
     const waypoints = [];
 
     if (this.layoutMode === 'wide') {
-      // Wide Layout: Z3 is on the Right (centered at currentGridOriginX, Z=0), Z2 bays are in the Center (X = -2.85)
       const originX = this.currentGridOriginX || getDynamicGridOriginX(gridWidth, 'wide');
       const roadApproachX = -1.55;
       const topLaneZ = -halfGridH;
@@ -1590,7 +2262,6 @@ export class Renderer3D {
         waypoints.push({ x: startX, z: bottomLaneZ, rotY: Math.PI });
         waypoints.push({ x: roadApproachX, z: bottomLaneZ, rotY: Math.PI / 2 });
       } else {
-        // dir === 'E'
         const laneZ = startZ <= 0 ? topLaneZ : bottomLaneZ;
         waypoints.push({ x: rightLaneX, z: startZ, rotY: -Math.PI / 2 });
         waypoints.push({
@@ -1612,7 +2283,6 @@ export class Renderer3D {
         rotY: pose.worldRotY,
       });
     } else {
-      // Vertical Layout: Z3 is on the Bottom, Z2 bays are in the Middle (Z = -3.70)
       const roadApproachZ = ROAD_CENTER_Z + 1.15;
 
       if (dir === 'N') {
@@ -1635,7 +2305,6 @@ export class Renderer3D {
         waypoints.push({ x: rightLaneX, z: roadApproachZ, rotY: 0 });
         waypoints.push({ x: pose.worldX + 0.35, z: roadApproachZ, rotY: Math.PI / 2 });
       } else {
-        // dir === 'S'
         const originZ = this.currentGridOriginZ || getDynamicGridOriginZ(gridHeight);
         const bottomLaneZ = originZ + halfGridH;
         const sideLaneX = startX <= 0 ? -halfGridW : halfGridW;
@@ -1684,7 +2353,7 @@ export class Renderer3D {
   }
 
   /**
-   * Spawns a 3D passenger runner from the loop gate to a parked bus in Zone B.
+   * Spawns a 3D passenger runner from the Boarding Door Ground Pad to a parked bus in Zone B.
    */
   spawnBoardingRunner(colorName, targetBusId, onArriveCallback) {
     const actor = this.busActors.get(targetBusId);
@@ -1767,24 +2436,58 @@ export class Renderer3D {
   }
 
   /**
+   * Returns the array of passengerQueue indices (0 <= idx < queueLen) that are currently
+   * walking across the high-contrast Boarding Door Ground Pad (near uLoop = 0).
+   * Passengers can ONLY board a parked vehicle when their circling row reaches this door zone!
+   */
+  getDoorGateEligibleIndices(queueLen) {
+    if (queueLen <= 0) return [];
+    const abreast = 5;
+    const maxLoopRows = this.loopCapacityRows || 24;
+    const activeLoopRows = Math.min(maxLoopRows, Math.max(1, Math.ceil(queueLen / abreast)));
+    const maxLoopPassengers = Math.min(queueLen, activeLoopRows * abreast);
+
+    // Door Ground Pad spans +/- 0.16 of the loop around uLoop = 0 (expanded slightly when few rows remain)
+    const doorThreshold = activeLoopRows <= 4 ? 0.28 : 0.16;
+    const eligibleRows = [];
+
+    for (let r = 0; r < activeLoopRows; r++) {
+      const uLoop = ((r / activeLoopRows) + this.loopTurnPhase) % 1.0;
+      const distFromDoor = Math.min(uLoop, 1.0 - uLoop);
+      if (distFromDoor <= doorThreshold) {
+        eligibleRows.push({ rowIdx: r, distFromDoor });
+      }
+    }
+
+    // Sort by closeness to the exact center of the Boarding Door Ground Pad
+    eligibleRows.sort((a, b) => a.distFromDoor - b.distFromDoor);
+
+    const eligibleIndices = [];
+    for (let i = 0; i < eligibleRows.length; i++) {
+      const baseIdx = eligibleRows[i].rowIdx * abreast;
+      for (let c = 0; c < abreast; c++) {
+        const pIdx = baseIdx + c;
+        if (pIdx < maxLoopPassengers) {
+          eligibleIndices.push(pIdx);
+        }
+      }
+    }
+    return eligibleIndices;
+  }
+
+  /**
    * Updates the 3D Passenger Queue positions in tightly packed rows of 5 abreast:
-   * - Rows 0..23 (up to 120 passengers) continuously revolve around the closed oval loop (`this.loopCurve`)
-   *   at a slow, steady pace (`this.loopTurnPhase`).
-   * - Rows 24+ wait in line along the stationary feeder walkway (`this.feederCurve`) and advance
-   *   into the turning circle as front passengers board buses.
+   * - Circle passengers revolve continuously around `this.loopCurve` and step across the
+   *   Neon Emerald & Gold Boarding Door Ground Pad (`uLoop = 0`).
+   * - Overflow passengers wait in line along `this.feederCurve`.
    */
   syncPassengerQueueVisuals(passengerQueue, elapsedSec) {
     const queueLen = passengerQueue.length;
     const abreast = 5;
-    const loopRows = this.loopCapacityRows || 24;
+    const maxLoopRows = this.loopCapacityRows || 24;
+    const activeLoopRows = Math.min(maxLoopRows, Math.max(1, Math.ceil(queueLen / abreast)));
 
-    const visualCount =
-      queueLen === 0
-        ? 0
-        : Math.min(
-            this.maxVisibleQueuePassengers,
-            Math.max(queueLen, Math.min(this.maxVisibleQueuePassengers, queueLen * 4))
-          );
+    const visualCount = Math.min(this.maxVisibleQueuePassengers, queueLen);
 
     for (let i = 0; i < this.maxVisibleQueuePassengers; i++) {
       const node = this.queuePassengerNodes[i];
@@ -1794,20 +2497,26 @@ export class Renderer3D {
       }
 
       node.group.visible = true;
-      const colorName = passengerQueue[i % queueLen];
+      const colorName = passengerQueue[i];
       this._setPassengerNodeColor(node, colorName);
 
       const rowIdx = Math.floor(i / abreast);
       const colIdx = i % abreast;
 
-      if (rowIdx < loopRows) {
-        // Inside the Oval Circle: continuously revolves at a slow pace
-        const uLoop = ((rowIdx / loopRows) + this.loopTurnPhase) % 1.0;
+      let atDoorBoost = 0;
+      if (rowIdx < activeLoopRows) {
+        // Inside the Oval Circle: continuously revolves at a steady pace
+        const uLoop = ((rowIdx / activeLoopRows) + this.loopTurnPhase) % 1.0;
         this.loopCurve.getPointAt(uLoop, _curvePt);
         this.loopCurve.getTangentAt(uLoop, _curveTan);
+
+        const distFromDoor = Math.min(uLoop, 1.0 - uLoop);
+        if (distFromDoor <= 0.14) {
+          atDoorBoost = (1 - distFromDoor / 0.14) * 0.055;
+        }
       } else {
         // Overflow Feeder Line: waits in line and steps forward as passengers board
-        const feederRow = rowIdx - loopRows + this.queueVisualScroll;
+        const feederRow = rowIdx - activeLoopRows + this.queueVisualScroll;
         const uFeeder = Math.min(0.985, 0.035 + feederRow * 0.042);
         this.feederCurve.getPointAt(uFeeder, _curvePt);
         this.feederCurve.getTangentAt(uFeeder, _curveTan);
@@ -1816,36 +2525,46 @@ export class Renderer3D {
       _perpVec.set(-_curveTan.z, 0, _curveTan.x).normalize();
       const lateralOffset = (colIdx - (abreast - 1) / 2) * 0.34;
 
-      const isTurning = rowIdx < loopRows;
-      const bobFreq = isTurning ? 8.2 : 4.5;
-      const bobAmp = isTurning ? 0.028 : 0.014;
+      const isTurning = rowIdx < activeLoopRows;
+      const bobFreq = isTurning ? 8.6 : 4.5;
+      const bobAmp = isTurning ? 0.032 : 0.014;
       const bob = Math.sin(elapsedSec * bobFreq + i * 0.7) * bobAmp;
 
       node.group.position.set(
         _curvePt.x + _perpVec.x * lateralOffset,
-        _curvePt.y + Math.max(0, bob),
+        _curvePt.y + Math.max(0, bob) + atDoorBoost,
         _curvePt.z + _perpVec.z * lateralOffset
       );
     }
   }
 
   /**
-   * Updates the 3D selection ring around the focused bus in Zone C.
+   * Updates both the 3D ground selection ring AND the overhead Flipped Arrow (▼)
+   * around the focused vehicle in Zone C.
    */
   setFocusedBus(busId) {
     this.focusedBusId = busId;
     if (!busId || !this.busActors.has(busId)) {
       this.focusRingMesh.visible = false;
+      if (this.focusArrowGroup) this.focusArrowGroup.visible = false;
       return;
     }
     const actor = this.busActors.get(busId);
     if (actor.state !== 'grid' && actor.state !== 'bumping') {
       this.focusRingMesh.visible = false;
+      if (this.focusArrowGroup) this.focusArrowGroup.visible = false;
       return;
     }
     this.focusRingMesh.visible = true;
     this.focusRingMesh.position.x = actor.group.position.x;
     this.focusRingMesh.position.z = actor.group.position.z;
+
+    if (this.focusArrowGroup) {
+      this.focusArrowGroup.visible = true;
+      this.focusArrowGroup.position.x = actor.group.position.x;
+      this.focusArrowGroup.position.z = actor.group.position.z;
+      this.focusArrowGroup.position.y = (actor.roofHeight || 0.98) + 0.65;
+    }
   }
 
   /**
@@ -1879,8 +2598,8 @@ export class Renderer3D {
    * Fixed 60Hz delta-time update for all 3D animations (zero allocations).
    */
   update(dt, passengerQueue, elapsedSec, onBusArrivedInBay) {
-    // Advance the continuous slow rotation of the passenger queue circle
-    this.loopTurnPhase = (this.loopTurnPhase + dt * 0.055) % 1.0;
+    // Advance the continuous steady rotation of the passenger queue circle
+    this.loopTurnPhase = (this.loopTurnPhase + dt * 0.082) % 1.0;
 
     if (this.queueVisualScroll > 0.001) {
       this.queueVisualScroll *= Math.exp(-10 * dt);
@@ -1889,10 +2608,16 @@ export class Renderer3D {
 
     this.syncPassengerQueueVisuals(passengerQueue, elapsedSec);
 
+    // Pulse Door Ground Pad beacons
+    if (this.doorBeaconMat) {
+      const glow = Math.sin(elapsedSec * 6.0) > 0 ? 0x34d399 : 0x10b981;
+      this.doorBeaconMat.color.setHex(glow);
+    }
+
     // Update active boarding runners
     for (let i = this.activeRunners.length - 1; i >= 0; i--) {
       const r = this.activeRunners[i];
-      r.progress += dt * 4.4;
+      r.progress += dt * 4.8;
       if (r.progress >= 1) {
         r.node.group.visible = false;
         r.onArrive?.();
@@ -1915,6 +2640,17 @@ export class Renderer3D {
     // Update all bus actors
     const driveSpeed = 20.0;
     for (const actor of this.busActors.values()) {
+      const ud = actor.group.userData || {};
+      if (ud.mysteryGroup && ud.mysteryGroup.visible) {
+        ud.mysteryGroup.rotation.y = elapsedSec * 2.4;
+      }
+      if (ud.expressGroup && ud.expressGroup.visible) {
+        ud.expressGroup.rotation.y = elapsedSec * 3.2;
+      }
+      if (ud.zzzGroup && ud.zzzGroup.visible) {
+        ud.zzzGroup.position.y = Math.sin(elapsedSec * 4.5) * 0.08;
+      }
+
       if (actor.shakeTimer > 0) {
         actor.shakeTimer = Math.max(0, actor.shakeTimer - dt);
         const shakeAngle = Math.sin(actor.shakeTimer * 48) * 0.12 * (actor.shakeTimer / 0.28);
@@ -2008,7 +2744,7 @@ export class Renderer3D {
       }
     }
 
-    // Pulse selection ring scale subtly
+    // Pulse selection ring AND bob/rotate overhead Flipped Arrow (▼)
     if (this.focusRingMesh && this.focusRingMesh.visible && this.focusedBusId) {
       const focusedActor = this.busActors.get(this.focusedBusId);
       if (focusedActor && (focusedActor.state === 'grid' || focusedActor.state === 'bumping')) {
@@ -2016,8 +2752,19 @@ export class Renderer3D {
         this.focusRingMesh.position.z = focusedActor.group.position.z;
         const pulse = 1 + Math.sin(elapsedSec * 7.0) * 0.05;
         this.focusRingMesh.scale.set(pulse, 1, pulse);
+
+        if (this.focusArrowGroup) {
+          this.focusArrowGroup.visible = true;
+          this.focusArrowGroup.position.x = focusedActor.group.position.x;
+          this.focusArrowGroup.position.z = focusedActor.group.position.z;
+          const baseRoof = focusedActor.roofHeight || 0.98;
+          this.focusArrowGroup.position.y =
+            baseRoof + 0.56 + Math.sin(elapsedSec * 7.5) * 0.16;
+          this.focusArrowGroup.rotation.y = elapsedSec * 2.6;
+        }
       } else {
         this.focusRingMesh.visible = false;
+        if (this.focusArrowGroup) this.focusArrowGroup.visible = false;
       }
     }
   }
@@ -2052,6 +2799,88 @@ export class Renderer3D {
     return badges;
   }
 
+  /**
+   * Computes 2D screen coordinates for the active mechanic badge on the grid vehicle in Zone C.
+   */
+  getGridMechanicScreenBadge(viewportW, viewportH) {
+    for (const actor of this.busActors.values()) {
+      if (actor.state !== 'grid' && actor.state !== 'bumping') continue;
+      const bus = actor.data;
+      if (!bus.mechanic) continue;
+      const st = bus.mechanicState || {};
+      let label = '';
+      let color = '#facc15';
+
+      switch (bus.mechanic) {
+        case 'mystery_tint':
+          if (st.revealed) continue;
+          label = '❓ VIP TINT';
+          color = '#c084fc';
+          break;
+        case 'traffic_light':
+          label = st.green !== false ? '🟢 GO' : '🔴 STOP';
+          color = st.green !== false ? '#4ade80' : '#f87171';
+          break;
+        case 'vip_rope':
+          if ((st.ropesRemaining ?? 0) <= 0) continue;
+          label = `🪢 ROPE ×${st.ropesRemaining}`;
+          color = '#fb7185';
+          break;
+        case 'tunnel_spawner':
+          if (st.spawned) continue;
+          label = '🚇 TUNNEL +1';
+          color = '#38bdf8';
+          break;
+        case 'tow_truck':
+          label = '🚜 SWEEPER (0 PAX)';
+          color = '#facc15';
+          break;
+        case 'sleeping_driver':
+          if (st.awake) continue;
+          label = '💤 ZZZ';
+          color = '#60a5fa';
+          break;
+        case 'direction_flipper':
+          label = '🔄 180° PAD';
+          color = '#22d3ee';
+          break;
+        case 'express_bonus':
+          if ((st.movesRemaining ?? 0) <= 0) continue;
+          label = `⏱️ +2 PTS (${st.movesRemaining})`;
+          color = '#facc15';
+          break;
+        case 'dual_color':
+          label = '🎨 2-TONE';
+          color = '#f472b6';
+          break;
+        case 'lift_barrier':
+          if (st.gateOpen) continue;
+          label = '🚧 GATE LOCKED';
+          color = '#fb923c';
+          break;
+        default:
+          continue;
+      }
+
+      _projVec.set(
+        actor.group.position.x,
+        (actor.roofHeight || 0.98) + 0.42,
+        actor.group.position.z
+      );
+      _projVec.project(this.camera);
+      if (_projVec.z >= -1 && _projVec.z <= 1) {
+        return {
+          id: actor.id,
+          x: ((_projVec.x + 1) * 0.5) * viewportW,
+          y: ((-_projVec.y + 1) * 0.5) * viewportH,
+          label,
+          color,
+        };
+      }
+    }
+    return null;
+  }
+
   render() {
     this.renderer.render(this.scene, this.camera);
   }
@@ -2079,10 +2908,9 @@ export class Renderer3D {
     const gridH = this.currentGridH || 6;
 
     if (this.layoutMode === 'wide') {
-      // Wide TV / Desktop Layout: Z1 (Left: X ~ -14.2..-6.5) | Z2 (Center: X ~ -2.85) | Z3 (Right: X ~ 1.25 .. 1.25 + gridW * CELL_SIZE)
       const worldLeftX = -14.8;
       const worldRightX = WIDE_LOT_LEFT_EDGE_X + gridW * CELL_SIZE + 1.8;
-      const totalWidthX = worldRightX - worldLeftX; // ~27.5 for 6x6 up to ~32.5 for 9x9
+      const totalWidthX = worldRightX - worldLeftX;
       const lookX = (worldLeftX + worldRightX) * 0.5 + 0.2;
 
       const worldTopZ = -Math.max(8.2, (gridH * CELL_SIZE) * 0.5 + 2.4);
@@ -2103,7 +2931,6 @@ export class Renderer3D {
       this.camera.position.set(lookX, camHeight, camZ);
       this.cameraLookTarget.set(lookX, 0, lookZ);
     } else {
-      // Vertical Phone Layout: Z1 (Top) -> Z2 (Middle) -> Z3 (Bottom)
       const lotBottomZ = LOT_TOP_EDGE_Z + gridH * CELL_SIZE;
       const worldTopZ = -13.2;
       const worldBottomZ = lotBottomZ + 2.8;

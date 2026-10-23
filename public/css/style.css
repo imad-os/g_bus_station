@@ -644,7 +644,7 @@ body {
 
 .saga-node-bus-pin {
   position: absolute;
-  top: -26px;
+  top: -28px;
   left: 50%;
   transform: translateX(-50%);
   background-color: #facc15;
@@ -659,10 +659,133 @@ body {
   pointer-events: none;
 }
 
+.saga-node-stn-kicker {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #bae6fd;
+  line-height: 1;
+  margin-bottom: 1px;
+}
+
+.saga-node-btn.is-locked .saga-node-stn-kicker {
+  color: #64748b;
+}
+
+.saga-node-mech-badge {
+  position: absolute;
+  bottom: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background-color: #3b0764;
+  border: 1.5px solid #c084fc;
+  color: #f3e8ff;
+  font-size: 10px;
+  font-weight: 900;
+  padding: 2px 8px;
+  border-radius: 8px;
+  white-space: nowrap;
+  box-shadow: 0 4px 10px rgba(2, 6, 23, 0.88);
+  pointer-events: none;
+}
+
+.saga-node-mech-badge.is-debut {
+  background-color: #422006;
+  border-color: #facc15;
+  color: #fef08a;
+}
+
 .saga-node-lock-svg {
-  width: 19px;
-  height: 19px;
-  margin-top: 2px;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+}
+
+/* 5 City District Quick-Jump Tabs (Stations 1–100) */
+.saga-district-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  width: 100%;
+}
+
+.saga-district-tab {
+  pointer-events: auto;
+  padding: 7px 8px;
+  border-radius: 12px;
+  border: 2px solid #334155;
+  background-color: #131c2e;
+  color: #94a3b8;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.14s ease;
+}
+
+.saga-district-tab:hover {
+  border-color: #38bdf8;
+  color: #f8fafc;
+}
+
+.saga-district-tab.is-active {
+  background-color: #0284c7;
+  border-color: #7dd3fc;
+  color: #f8fafc;
+  box-shadow: 0 3px 0 #0c4a6e;
+}
+
+/* Wide TV Mode Horizontal Winding City Route Saga Map */
+.saga-map-viewport.is-wide-horizontal {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.saga-map-viewport.is-wide-horizontal::-webkit-scrollbar {
+  height: 11px;
+}
+
+.saga-map-canvas.is-wide-horizontal {
+  max-width: none;
+  height: 100%;
+  min-height: 320px;
+  margin: 0;
+}
+
+/* HUD Mechanic Pill & 3D Floating Mechanic Badge */
+.hud-mechanic-pill {
+  background-color: #3b0764;
+  border: 1.5px solid #c084fc;
+  color: #f3e8ff;
+  font-size: 11px;
+  font-weight: 900;
+  padding: 2px 9px;
+  border-radius: 9px;
+  letter-spacing: 0.03em;
+  margin-left: 4px;
+  box-shadow: 0 3px 8px rgba(2, 6, 23, 0.7);
+}
+
+.grid-mechanic-badge {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 3px 10px;
+  border-radius: 10px;
+  background-color: rgba(15, 23, 42, 0.94);
+  border: 2px solid #facc15;
+  color: #fef08a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.03em;
+  box-shadow: 0 5px 14px rgba(2, 6, 23, 0.88);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 6;
 }
 
 .saga-footer-bar {
@@ -808,6 +931,10 @@ body {
 
   .modal-stats-row-4 {
     grid-template-columns: repeat(2, 1fr);
+  }
+
+  .saga-district-tabs {
+    grid-template-columns: repeat(3, 1fr);
   }
 
   .saga-footer-controls {

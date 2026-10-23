@@ -5,6 +5,10 @@
 import {
   findBlockingBus,
   getBusWorldCenter,
+  getBusCells,
+  areBusesAdjacent,
+  STAGE_MECHANICS,
+  selectMechanicForLevel,
 } from './solver.js';
 import { LevelManager } from './levelManager.js';
 import { Renderer3D, getDynamicGridOriginZ, getDynamicGridOriginX } from './renderer3d.js';
@@ -212,7 +216,7 @@ const I18N = {
 };
 
 const LIGHTING_MODES = ['auto', 'day', 'sunset', 'night'];
-const SAGA_TOTAL_NODES = 30;
+const SAGA_TOTAL_NODES = 100;
 
 export class BusFeverGame {
   constructor() {
@@ -1451,36 +1455,37 @@ export class BusFeverGame {
       this.boardingCooldown = Math.max(0, this.boardingCooldown - dt);
     }
 
-    let anyBoardingPossible = false;
+    let anyMatchingColorInQueue = false;
 
     if (this.passengerQueue.length > 0) {
-      // Because the 3D circle queue continuously turns past the boarding gate,
-      // check the front gate window of the revolving circle (first row / front passenger)
-      // plus the row currently aligned with the gate (uLoop near 0 / 1)
-      const loopRows = this.renderer3d?.loopCapacityRows || 24;
-      const abreast = 5;
-      const loopCap = Math.min(this.passengerQueue.length, loopRows * abreast);
-      const turnPhase = this.renderer3d?.loopTurnPhase || 0;
-      const gateRowIdx =
-        (((loopRows - Math.round(turnPhase * loopRows)) % loopRows) + loopRows) % loopRows;
-      const gateWindowStart = Math.min(Math.max(0, gateRowIdx * abreast), Math.max(0, loopCap - 1));
+      // Check if ANY passenger in the revolving circle or line matches a parked vehicle
+      // (so the deadlock timer never fires while matching passengers are walking around the circle toward the Door Ground Pad)
+      for (let i = 0; i < this.dockSlots.length; i++) {
+        const slot = this.dockSlots[i];
+        if (!slot.busId) continue;
+        const actor = this.renderer3d.busActors.get(slot.busId);
+        if (actor && actor.state === 'parked' && actor.remainingCapacity > 0) {
+          if (this.passengerQueue.includes(actor.data.color)) {
+            anyMatchingColorInQueue = true;
+            break;
+          }
+        }
+      }
+
+      // STRICT DOOR-GATE BOARDING:
+      // Passengers walking in the revolving circle can ONLY board a parked vehicle
+      // when their row reaches the high-contrast Boarding Door Ground Pad (uLoop near 0).
+      const candidateIndices = this.renderer3d.getDoorGateEligibleIndices(
+        this.passengerQueue.length
+      );
 
       let matchQueueIdx = -1;
       let matchingActor = null;
       let matchingSlot = null;
 
-      // Priority 1: Front of queue (index 0)
-      // Priority 2: Passenger currently passing the boarding gate as the circle revolves
-      const candidateIndices = [0];
-      for (let g = 0; g < abreast; g++) {
-        const idx = (gateWindowStart + g) % Math.max(1, loopCap);
-        if (idx < this.passengerQueue.length && !candidateIndices.includes(idx)) {
-          candidateIndices.push(idx);
-        }
-      }
-
       for (let c = 0; c < candidateIndices.length && !matchingActor; c++) {
         const qIdx = candidateIndices[c];
+        if (qIdx < 0 || qIdx >= this.passengerQueue.length) continue;
         const candidateColor = this.passengerQueue[qIdx];
         for (let i = 0; i < this.dockSlots.length; i++) {
           const slot = this.dockSlots[i];
@@ -1501,14 +1506,31 @@ export class BusFeverGame {
       }
 
       if (matchingActor && matchQueueIdx !== -1) {
-        anyBoardingPossible = true;
         this.deadlockTimer = 0;
 
         if (this.boardingCooldown <= 0) {
-          this.boardingCooldown = 0.105;
+          // Fast boarding cadence so 25-seat buses and 40-seat double-deckers board smoothly at the Door Pad
+          this.boardingCooldown = 0.052;
           const [boardedColor] = this.passengerQueue.splice(matchQueueIdx, 1);
           matchingActor.remainingCapacity = Math.max(0, matchingActor.remainingCapacity - 1);
           matchingActor.boardedCount++;
+
+          // Mechanic 9: Dual-Color Coach switches from Front Color to Rear Color halfway through boarding
+          const mState = matchingActor.data.mechanicState;
+          if (
+            matchingActor.data.mechanic === 'dual_color' &&
+            mState &&
+            !mState.switchedToSecondary &&
+            matchingActor.boardedCount >= mState.switchAtSeated &&
+            matchingActor.remainingCapacity > 0
+          ) {
+            mState.switchedToSecondary = true;
+            matchingActor.data.color = mState.secondaryColor;
+            this.renderer3d.recolorParkedBus(matchingActor.id, mState.secondaryColor);
+            this._flashToast(
+              `🎨 Dual-Color Coach switched to ${mState.secondaryColor.toUpperCase()}!`
+            );
+          }
 
           this.sound.playPassengerBoard(matchingActor.boardedCount);
           this._updateHudDom();
@@ -1528,6 +1550,19 @@ export class BusFeverGame {
                 this.saveData.bestScore = this.saveData.score;
               }
               this._saveProgress();
+
+              // Mechanic 10: City Lift Barrier opens once the first full vehicle departs a bay
+              for (const b of this.activeGridBuses) {
+                if (
+                  b.mechanic === 'lift_barrier' &&
+                  b.mechanicState &&
+                  !b.mechanicState.gateOpen
+                ) {
+                  b.mechanicState.gateOpen = true;
+                  this.renderer3d.syncBusMechanicState(b.id);
+                  this._flashToast('🚧 City Lift Barrier Raised!');
+                }
+              }
 
               this.renderer3d.triggerBusDeparture(targetBusId, () => {
                 this.departedBusesCount++;
@@ -1557,7 +1592,7 @@ export class BusFeverGame {
 
     if (
       allRegularOccupied &&
-      !anyBoardingPossible &&
+      !anyMatchingColorInQueue &&
       this.renderer3d.activeRunners.length === 0 &&
       this.passengerQueue.length > 0
     ) {
@@ -1687,6 +1722,14 @@ export class BusFeverGame {
     if (this.renderer3d && prevMode !== this.renderer3d.layoutMode) {
       this.renderer3d.syncPassengerQueueVisuals(this.passengerQueue, this.elapsedSec);
     }
+    const isWideNow = window.innerWidth / Math.max(1, window.innerHeight) >= 1.05;
+    if (this._sagaIsWide !== isWideNow) {
+      this._buildLevelPickersDom();
+      this._updateHudDom();
+      if (this.gameState === 'title') {
+        this._scrollSagaMapToLevel(this.saveData.currentLevel || this.saveData.highestLevel || 1);
+      }
+    }
   }
 
   _flashToast(msg) {
@@ -1697,7 +1740,7 @@ export class BusFeverGame {
     clearTimeout(this._toastTimer);
     this._toastTimer = setTimeout(() => {
       banner.classList.remove('visible');
-    }, 1700);
+    }, 1900);
   }
 
   _syncParkedCapacityBadgesDom() {
@@ -1709,13 +1752,15 @@ export class BusFeverGame {
       window.innerHeight
     );
 
-    while (container.children.length < badges.length) {
+    // Ensure pool of capacity badges
+    while (container.querySelectorAll('.parked-capacity-badge').length < badges.length) {
       const el = document.createElement('div');
       el.className = 'parked-capacity-badge';
       container.appendChild(el);
     }
-    for (let i = 0; i < container.children.length; i++) {
-      const el = container.children[i];
+    const capEls = container.querySelectorAll('.parked-capacity-badge');
+    for (let i = 0; i < capEls.length; i++) {
+      const el = capEls[i];
       if (i >= badges.length) {
         el.style.display = 'none';
       } else {
@@ -1725,6 +1770,32 @@ export class BusFeverGame {
         el.style.backgroundColor = b.cssColor;
         const txt = String(b.capacity);
         if (el.textContent !== txt) el.textContent = txt;
+      }
+    }
+
+    // Floating 3D Mechanic status badge over the stage's single mechanic vehicle
+    let mechBadgeEl = document.getElementById('grid-mechanic-floating-badge');
+    if (!mechBadgeEl) {
+      mechBadgeEl = document.createElement('div');
+      mechBadgeEl.id = 'grid-mechanic-floating-badge';
+      mechBadgeEl.className = 'grid-mechanic-badge';
+      container.appendChild(mechBadgeEl);
+    }
+
+    const mechInfo =
+      this.gameState === 'playing'
+        ? this.renderer3d.getGridMechanicScreenBadge(window.innerWidth, window.innerHeight)
+        : null;
+
+    if (!mechInfo) {
+      mechBadgeEl.style.display = 'none';
+    } else {
+      mechBadgeEl.style.display = 'inline-flex';
+      mechBadgeEl.style.transform = `translate3d(${Math.round(mechInfo.x)}px, ${Math.round(mechInfo.y)}px, 0) translate(-50%, -100%)`;
+      mechBadgeEl.style.borderColor = mechInfo.borderCss || '#38bdf8';
+      const label = `${mechInfo.icon} ${mechInfo.text}`;
+      if (mechBadgeEl.textContent !== label) {
+        mechBadgeEl.textContent = label;
       }
     }
   }
@@ -1793,9 +1864,23 @@ export class BusFeverGame {
       if (el && el.textContent !== String(text)) el.textContent = String(text);
     };
 
-    setTxt('hud-level-title', `${this.t('level')} ${lvlNum}`);
+    setTxt('hud-level-title', `STATION ${String(lvlNum).padStart(2, '0')}`);
     setTxt('hud-sub-meta', `${this.t('queue')}: ${this.passengerQueue.length}`);
     setTxt('hud-coins-meta', `🪙 ${curPoints} PTS`);
+
+    // Active stage mechanic badge in the top HUD bar
+    const mechPill = document.getElementById('hud-mechanic-pill');
+    if (mechPill) {
+      const activeMech = this.stage?.activeMechanic;
+      if (activeMech) {
+        mechPill.hidden = false;
+        const txt = `${activeMech.icon} ${activeMech.name}`;
+        if (mechPill.textContent !== txt) mechPill.textContent = txt;
+        mechPill.title = activeMech.shortRule || '';
+      } else {
+        mechPill.hidden = true;
+      }
+    }
 
     const modeName = this._getLightingModeDisplayName();
     setTxt('hud-time-label', modeName);
@@ -1814,11 +1899,14 @@ export class BusFeverGame {
     );
 
     // Title Modal (Full-Screen Saga Map Home Page) stats
-    setTxt('title-stat-lv-val', `${highestLvl}`);
+    setTxt('title-stat-lv-val', `${highestLvl} / ${SAGA_TOTAL_NODES}`);
     setTxt('title-stat-score-val', this.saveData.bestScore);
     setTxt('title-stat-points-val', `🪙 ${curPoints}`);
     setTxt('title-stat-coins-val', `${openedExtraCount} / 3`);
-    setTxt('btn-title-play', `▶ ${this.t('playNow')} · ${this.t('level')} ${lvlNum}`);
+    setTxt(
+      'btn-title-play',
+      `▶ ${this.t('playNow')} · STATION ${String(lvlNum).padStart(2, '0')}`
+    );
 
     // Update '+1 Parking Spot' unlocker buttons in both Title Saga Map & Pause Menu
     const updateSpotUnlockerBtn = (btnId) => {
@@ -1840,7 +1928,7 @@ export class BusFeverGame {
     updateSpotUnlockerBtn('btn-title-unlock-bay');
     updateSpotUnlockerBtn('btn-pause-unlock-bay');
 
-    // Update Candy Crush-style Saga Map nodes & progress line
+    // Update City Route Saga Map nodes & progress line
     this._updateSagaMapDom(lvlNum, highestLvl);
 
     // Update Bottom Booster Bar cards (Milestone unlocks at Level 5, Level 10, Level 15)
@@ -1863,7 +1951,7 @@ export class BusFeverGame {
         );
         setTxt(
           'btn-gameover-next',
-          `${this.t('nextLevel')} (${this.t('level')} ${this.saveData.currentLevel})`
+          `${this.t('nextLevel')} (STATION ${String(this.saveData.currentLevel).padStart(2, '0')})`
         );
         setTxt('go-stat-lv-val', Math.max(1, this.saveData.currentLevel - 1));
       } else {
@@ -1927,110 +2015,279 @@ export class BusFeverGame {
   }
 
   /**
-   * Builds the Full-Screen Candy Crush-style Winding Highway Saga Map inside #title-level-picker.
-   * Levels 1..30 wind along an S-curve transit highway with district banners and parking spot milestones.
+   * Builds the 100-Station Winding City Route Saga Map inside #title-level-picker.
+   * - On TV Wide-Screen (`aspect >= 1.05`): renders a HORIZONTAL Winding City Route
+   *   meandering through city blocks, green parks, rivers/canals, and crosswalks (never a straight highway).
+   * - On Vertical Mobile (`aspect < 1.05`): renders a VERTICAL Winding City Route.
+   * - Each level is a Transit Station (`STN 01` .. `STN 100`), with debut tags for the 10 progressive mechanics.
    */
   _buildLevelPickersDom() {
+    const scrollEl = document.getElementById('title-saga-scroll');
     const container = document.getElementById('title-level-picker');
     if (!container) return;
     container.innerHTML = '';
 
-    const totalNodes = Math.max(SAGA_TOTAL_NODES, (this.saveData.highestLevel || 1) + 5);
-    const stepY = 82;
-    const padTop = 58;
-    const totalHeight = padTop * 2 + (totalNodes - 1) * stepY;
-    container.style.height = `${totalHeight}px`;
+    const isWide = window.innerWidth / Math.max(1, window.innerHeight) >= 1.05;
+    this._sagaIsWide = isWide;
 
-    const coords = [];
-    for (let i = 0; i < totalNodes; i++) {
-      const lvl = i + 1;
-      const xPct = 50 + Math.sin(i * 0.85) * 31;
-      const svgX = (xPct / 100) * 600;
-      const yPx = padTop + i * stepY;
-      coords.push({ lvl, xPct, svgX, yPx });
+    if (scrollEl) {
+      scrollEl.classList.toggle('is-wide-horizontal', isWide);
     }
-    this._sagaNodeCoords = coords;
+    container.classList.toggle('is-wide-horizontal', isWide);
 
-    // Build smooth cubic Bezier SVG path string
-    const buildSvgPath = (pts) => {
-      if (pts.length === 0) return '';
-      let d = `M ${pts[0].svgX.toFixed(1)} ${pts[0].yPx.toFixed(1)}`;
-      for (let i = 0; i < pts.length - 1; i++) {
-        const p0 = pts[i];
-        const p1 = pts[i + 1];
-        const midY = (p0.yPx + p1.yPx) / 2;
-        d += ` C ${p0.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${p1.yPx.toFixed(1)}`;
-      }
-      return d;
-    };
-
-    const fullPathD = buildSvgPath(coords);
+    const totalNodes = Math.max(SAGA_TOTAL_NODES, (this.saveData.highestLevel || 1) + 5);
+    const coords = [];
 
     const svgNS = 'http://www.w3.org/2000/svg';
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('class', 'saga-path-svg');
-    svg.setAttribute('viewBox', `0 0 600 ${totalHeight}`);
     svg.setAttribute('preserveAspectRatio', 'none');
 
-    // 1. Highway curb outline
+    if (isWide) {
+      // HORIZONTAL WINDING CITY ROUTE (TV / Wide Screen)
+      const stepX = 118;
+      const padX = 110;
+      const totalWidth = padX * 2 + (totalNodes - 1) * stepX;
+      const svgH = 540;
+
+      container.style.width = `${totalWidth}px`;
+      container.style.height = '100%';
+      svg.setAttribute('viewBox', `0 0 ${totalWidth} ${svgH}`);
+
+      for (let i = 0; i < totalNodes; i++) {
+        const lvl = i + 1;
+        const xPx = padX + i * stepX;
+        // Organic winding city street curve (combining two harmonics so it meanders around city blocks and parks)
+        const wave = Math.sin(i * 0.62) * 28 + Math.cos(i * 0.27) * 11;
+        const yPct = Math.max(16, Math.min(84, 51 + wave));
+        const svgY = (yPct / 100) * svgH;
+        coords.push({ lvl, xPx, yPct, svgX: xPx, svgY });
+      }
+
+      // Render atmospheric city blocks, parks, rivers/canals, and avenues behind the road
+      const cityDecorGroup = document.createElementNS(svgNS, 'g');
+      for (let bx = 40; bx < totalWidth - 80; bx += 236) {
+        const idx = Math.floor(bx / 236);
+        // Canal / River crossing every 5th block
+        if (idx % 5 === 2) {
+          const river = document.createElementNS(svgNS, 'path');
+          river.setAttribute(
+            'd',
+            `M ${bx + 70} 0 Q ${bx + 115} ${svgH * 0.5} ${bx + 60} ${svgH}`
+          );
+          river.setAttribute('fill', 'none');
+          river.setAttribute('stroke', 'rgba(14, 116, 144, 0.34)');
+          river.setAttribute('stroke-width', '54');
+          cityDecorGroup.appendChild(river);
+        }
+
+        // Top & bottom city blocks / parks
+        const topIsPark = idx % 3 === 1;
+        const topRect = document.createElementNS(svgNS, 'rect');
+        topRect.setAttribute('x', String(bx));
+        topRect.setAttribute('y', '18');
+        topRect.setAttribute('width', '175');
+        topRect.setAttribute('height', '115');
+        topRect.setAttribute('rx', '16');
+        topRect.setAttribute(
+          'fill',
+          topIsPark ? 'rgba(16, 185, 129, 0.13)' : 'rgba(30, 41, 59, 0.55)'
+        );
+        topRect.setAttribute(
+          'stroke',
+          topIsPark ? 'rgba(52, 211, 153, 0.25)' : 'rgba(71, 85, 105, 0.38)'
+        );
+        topRect.setAttribute('stroke-width', '2');
+        cityDecorGroup.appendChild(topRect);
+
+        const botIsPark = idx % 3 === 2;
+        const botRect = document.createElementNS(svgNS, 'rect');
+        botRect.setAttribute('x', String(bx + 28));
+        botRect.setAttribute('y', String(svgH - 138));
+        botRect.setAttribute('width', '182');
+        botRect.setAttribute('height', '116');
+        botRect.setAttribute('rx', '16');
+        botRect.setAttribute(
+          'fill',
+          botIsPark ? 'rgba(16, 185, 129, 0.13)' : 'rgba(30, 41, 59, 0.55)'
+        );
+        botRect.setAttribute(
+          'stroke',
+          botIsPark ? 'rgba(52, 211, 153, 0.25)' : 'rgba(71, 85, 105, 0.38)'
+        );
+        botRect.setAttribute('stroke-width', '2');
+        cityDecorGroup.appendChild(botRect);
+
+        // Cross-street avenue grid lines
+        const crossSt = document.createElementNS(svgNS, 'line');
+        crossSt.setAttribute('x1', String(bx + 90));
+        crossSt.setAttribute('y1', '0');
+        crossSt.setAttribute('x2', String(bx + 90));
+        crossSt.setAttribute('y2', String(svgH));
+        crossSt.setAttribute('stroke', 'rgba(51, 65, 85, 0.32)');
+        crossSt.setAttribute('stroke-width', '14');
+        cityDecorGroup.appendChild(crossSt);
+      }
+      svg.appendChild(cityDecorGroup);
+    } else {
+      // VERTICAL WINDING CITY ROUTE (Phone / Portrait Screen)
+      const stepY = 86;
+      const padTop = 64;
+      const totalHeight = padTop * 2 + (totalNodes - 1) * stepY;
+      const svgW = 600;
+
+      container.style.width = '100%';
+      container.style.height = `${totalHeight}px`;
+      svg.setAttribute('viewBox', `0 0 ${svgW} ${totalHeight}`);
+
+      for (let i = 0; i < totalNodes; i++) {
+        const lvl = i + 1;
+        const wave = Math.sin(i * 0.72) * 28 + Math.cos(i * 0.31) * 8;
+        const xPct = Math.max(16, Math.min(84, 50 + wave));
+        const svgX = (xPct / 100) * svgW;
+        const yPx = padTop + i * stepY;
+        coords.push({ lvl, xPct, yPx, svgX, svgY: yPx });
+      }
+
+      const cityDecorGroup = document.createElementNS(svgNS, 'g');
+      for (let by = 50; by < totalHeight - 100; by += 240) {
+        const idx = Math.floor(by / 240);
+        if (idx % 5 === 2) {
+          const river = document.createElementNS(svgNS, 'path');
+          river.setAttribute(
+            'd',
+            `M 0 ${by + 70} Q ${svgW * 0.5} ${by + 115} ${svgW} ${by + 60}`
+          );
+          river.setAttribute('fill', 'none');
+          river.setAttribute('stroke', 'rgba(14, 116, 144, 0.32)');
+          river.setAttribute('stroke-width', '46');
+          cityDecorGroup.appendChild(river);
+        }
+
+        const leftRect = document.createElementNS(svgNS, 'rect');
+        leftRect.setAttribute('x', '18');
+        leftRect.setAttribute('y', String(by));
+        leftRect.setAttribute('width', '130');
+        leftRect.setAttribute('height', '165');
+        leftRect.setAttribute('rx', '16');
+        leftRect.setAttribute(
+          'fill',
+          idx % 3 === 1 ? 'rgba(16, 185, 129, 0.13)' : 'rgba(30, 41, 59, 0.52)'
+        );
+        cityDecorGroup.appendChild(leftRect);
+
+        const rightRect = document.createElementNS(svgNS, 'rect');
+        rightRect.setAttribute('x', String(svgW - 148));
+        rightRect.setAttribute('y', String(by + 30));
+        rightRect.setAttribute('width', '130');
+        rightRect.setAttribute('height', '165');
+        rightRect.setAttribute('rx', '16');
+        rightRect.setAttribute(
+          'fill',
+          idx % 3 === 2 ? 'rgba(16, 185, 129, 0.13)' : 'rgba(30, 41, 59, 0.52)'
+        );
+        cityDecorGroup.appendChild(rightRect);
+      }
+      svg.appendChild(cityDecorGroup);
+    }
+
+    this._sagaNodeCoords = coords;
+
+    // Build smooth cubic Bezier SVG path string for either Horizontal or Vertical city route
+    const buildSvgPath = (pts) => {
+      if (pts.length === 0) return '';
+      let d = `M ${pts[0].svgX.toFixed(1)} ${pts[0].svgY.toFixed(1)}`;
+      for (let i = 0; i < pts.length - 1; i++) {
+        const p0 = pts[i];
+        const p1 = pts[i + 1];
+        if (isWide) {
+          const midX = (p0.svgX + p1.svgX) / 2;
+          d += ` C ${midX.toFixed(1)} ${p0.svgY.toFixed(1)}, ${midX.toFixed(1)} ${p1.svgY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${p1.svgY.toFixed(1)}`;
+        } else {
+          const midY = (p0.svgY + p1.svgY) / 2;
+          d += ` C ${p0.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${p1.svgY.toFixed(1)}`;
+        }
+      }
+      return d;
+    };
+
+    this._buildSagaSvgPathFn = buildSvgPath;
+    const fullPathD = buildSvgPath(coords);
+
+    // 1. City sidewalk / curb outline
     const roadBorder = document.createElementNS(svgNS, 'path');
     roadBorder.setAttribute('d', fullPathD);
     roadBorder.setAttribute('fill', 'none');
-    roadBorder.setAttribute('stroke', '#334155');
-    roadBorder.setAttribute('stroke-width', '34');
+    roadBorder.setAttribute('stroke', '#475569');
+    roadBorder.setAttribute('stroke-width', '40');
     roadBorder.setAttribute('stroke-linecap', 'round');
     svg.appendChild(roadBorder);
 
-    // 2. Dark asphalt road surface
+    // 2. Dark city asphalt road surface
     const roadBase = document.createElementNS(svgNS, 'path');
     roadBase.setAttribute('d', fullPathD);
     roadBase.setAttribute('fill', 'none');
     roadBase.setAttribute('stroke', '#0f172a');
-    roadBase.setAttribute('stroke-width', '26');
+    roadBase.setAttribute('stroke-width', '30');
     roadBase.setAttribute('stroke-linecap', 'round');
     svg.appendChild(roadBase);
 
-    // 3. Glowing unlocked progress trail
+    // 3. Glowing unlocked transit line trail
     const progressPath = document.createElementNS(svgNS, 'path');
     progressPath.setAttribute('id', 'saga-progress-path');
     progressPath.setAttribute('d', '');
     progressPath.setAttribute('fill', 'none');
     progressPath.setAttribute('stroke', '#38bdf8');
-    progressPath.setAttribute('stroke-width', '9');
+    progressPath.setAttribute('stroke-width', '10');
     progressPath.setAttribute('stroke-linecap', 'round');
     svg.appendChild(progressPath);
 
-    // 4. Dashed amber highway center line
+    // 4. Dashed amber city lane divider
     const centerLine = document.createElementNS(svgNS, 'path');
     centerLine.setAttribute('d', fullPathD);
     centerLine.setAttribute('fill', 'none');
-    centerLine.setAttribute('stroke', 'rgba(250, 204, 21, 0.5)');
+    centerLine.setAttribute('stroke', 'rgba(250, 204, 21, 0.55)');
     centerLine.setAttribute('stroke-width', '3');
-    centerLine.setAttribute('stroke-dasharray', '9 11');
+    centerLine.setAttribute('stroke-dasharray', '10 12');
     centerLine.setAttribute('stroke-linecap', 'round');
     svg.appendChild(centerLine);
 
     container.appendChild(svg);
 
+    // 5 City Districts across 100 Stations
     const districtTitles = {
-      1: '🏙️ District 1 · Downtown Terminal (Pure Color Chunks)',
-      5: '🌉 District 2 · Harbor Bridge (Medium Color Chunks)',
-      12: '🌇 District 3 · Sunset Overpass (Mixed Rush Hour)',
-      20: '🌃 District 4 · Neon Metro Hub (Master Transit Grid)',
+      1: '🏙️ District 1 · Downtown Loop (Stations 1–20)',
+      21: '⚓ District 2 · Harbor Docks (Stations 21–40)',
+      41: '🌇 District 3 · Midtown Plaza (Stations 41–60)',
+      61: '🧪 District 4 · Tech Campus (Stations 61–80)',
+      81: '🌃 District 5 · Uptown Skyline (Stations 81–100)',
     };
+
+    // Debut levels for the 10 progressive mechanics (1 new mechanic every 10 levels)
+    const mechanicDebutByLevel = {};
+    STAGE_MECHANICS.forEach((m) => {
+      mechanicDebutByLevel[m.debutLevel] = m;
+    });
 
     const spotCostTags = {
       4: { spot: 1, cost: 10 },
-      10: { spot: 2, cost: 30 },
-      25: { spot: 3, cost: 100 },
+      15: { spot: 2, cost: 30 },
+      35: { spot: 3, cost: 100 },
     };
 
-    // Create interactive 3D level node buttons along the winding highway
-    coords.forEach(({ lvl, xPct, yPx }) => {
+    // Create interactive 3D Station node buttons along the winding city street
+    coords.forEach((pt) => {
+      const { lvl } = pt;
+
       if (districtTitles[lvl]) {
         const banner = document.createElement('div');
         banner.className = 'saga-district-banner';
-        banner.style.top = `${Math.max(18, yPx - 44)}px`;
+        if (isWide) {
+          banner.style.left = `${pt.xPx}px`;
+          banner.style.top = '18px';
+        } else {
+          banner.style.top = `${Math.max(18, pt.yPx - 46)}px`;
+        }
         banner.textContent = districtTitles[lvl];
         container.appendChild(banner);
       }
@@ -2041,9 +2298,14 @@ export class BusFeverGame {
         tag.className = 'saga-milestone-tag';
         tag.setAttribute('data-spot-idx', String(info.spot));
         tag.setAttribute('data-spot-cost', String(info.cost));
-        const tagXPct = xPct > 50 ? xPct - 24 : xPct + 24;
-        tag.style.left = `${tagXPct}%`;
-        tag.style.top = `${yPx}px`;
+        if (isWide) {
+          tag.style.left = `${pt.xPx}px`;
+          tag.style.top = `${pt.yPct > 50 ? pt.yPct - 22 : pt.yPct + 22}%`;
+        } else {
+          const tagXPct = pt.xPct > 50 ? pt.xPct - 24 : pt.xPct + 24;
+          tag.style.left = `${tagXPct}%`;
+          tag.style.top = `${pt.yPx}px`;
+        }
         tag.textContent = `🅿️ SPOT #${info.spot} · ${info.cost} PTS`;
         container.appendChild(tag);
       }
@@ -2052,8 +2314,20 @@ export class BusFeverGame {
       btn.type = 'button';
       btn.className = 'saga-node-btn';
       btn.setAttribute('data-level', String(lvl));
-      btn.style.left = `${xPct}%`;
-      btn.style.top = `${yPx}px`;
+      if (mechanicDebutByLevel[lvl]) {
+        btn.setAttribute(
+          'data-mech-debut',
+          `${mechanicDebutByLevel[lvl].icon} NEW: ${mechanicDebutByLevel[lvl].name}`
+        );
+      }
+
+      if (isWide) {
+        btn.style.left = `${pt.xPx}px`;
+        btn.style.top = `${pt.yPct}%`;
+      } else {
+        btn.style.left = `${pt.xPct}%`;
+        btn.style.top = `${pt.yPx}px`;
+      }
 
       btn.addEventListener('click', () => {
         this.sound.initInOnStart();
@@ -2075,7 +2349,7 @@ export class BusFeverGame {
   }
 
   /**
-   * Updates all Saga Map nodes (Completed stars, Frontier 'PLAY' bus badge, or Locked padlock).
+   * Updates all 100 Station nodes on the City Route Saga Map.
    */
   _updateSagaMapDom(currentLvl, highestLvl) {
     const container = document.getElementById('title-level-picker');
@@ -2083,24 +2357,25 @@ export class BusFeverGame {
 
     const coords = this._sagaNodeCoords || [];
     const progressPath = document.getElementById('saga-progress-path');
-    if (progressPath && coords.length > 0) {
+    if (progressPath && coords.length > 0 && this._buildSagaSvgPathFn) {
       const unlockedPts = coords.slice(0, Math.min(coords.length, highestLvl));
       if (unlockedPts.length <= 1) {
         progressPath.setAttribute('d', '');
       } else {
-        let d = `M ${unlockedPts[0].svgX.toFixed(1)} ${unlockedPts[0].yPx.toFixed(1)}`;
-        for (let i = 0; i < unlockedPts.length - 1; i++) {
-          const p0 = unlockedPts[i];
-          const p1 = unlockedPts[i + 1];
-          const midY = (p0.yPx + p1.yPx) / 2;
-          d += ` C ${p0.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${midY.toFixed(1)}, ${p1.svgX.toFixed(1)} ${p1.yPx.toFixed(1)}`;
-        }
-        progressPath.setAttribute('d', d);
+        progressPath.setAttribute('d', this._buildSagaSvgPathFn(unlockedPts));
       }
     }
 
     const openedExtra = Math.max(0, Math.min(3, Math.floor(this.saveData.openedExtraBays || 0)));
     const curPoints = Math.max(0, Math.floor(this.saveData.coins || 0));
+
+    // Highlight active District Quick-Jump Tab
+    const districtTabs = document.querySelectorAll('.saga-district-tab');
+    districtTabs.forEach((tab) => {
+      const startLvl = parseInt(tab.getAttribute('data-start-level') || '1', 10);
+      const isCurrentDistrict = currentLvl >= startLvl && currentLvl < startLvl + 20;
+      tab.classList.toggle('is-active', isCurrentDistrict);
+    });
 
     // Update parking spot milestone tags
     const milestoneTags = container.querySelectorAll('.saga-milestone-tag');
@@ -2126,6 +2401,7 @@ export class BusFeverGame {
       const isFrontier = lvl === highestLvl;
       const isLocked = lvl > highestLvl;
       const isSelected = lvl === currentLvl;
+      const mechDebut = btn.getAttribute('data-mech-debut') || '';
 
       btn.classList.toggle('is-completed', isCompleted);
       btn.classList.toggle('is-frontier', isFrontier);
@@ -2133,29 +2409,40 @@ export class BusFeverGame {
       btn.classList.toggle('is-selected', isSelected && !isFrontier);
       btn.setAttribute(
         'aria-label',
-        isLocked ? `Level ${lvl} Locked` : `Play Level ${lvl}`
+        isLocked ? `Station ${lvl} Locked` : `Play Station ${lvl}`
       );
 
       const desiredStateKey = `${lvl}_${isCompleted ? 'c' : isFrontier ? 'f' : 'l'}`;
       if (btn.getAttribute('data-render-key') !== desiredStateKey) {
         btn.setAttribute('data-render-key', desiredStateKey);
+        const stnCode = `STN ${String(lvl).padStart(2, '0')}`;
+        const mechBadgeHtml = mechDebut
+          ? `<span class="saga-node-mech-badge">${mechDebut}</span>`
+          : '';
+
         if (isCompleted) {
           btn.innerHTML = `
             <span class="saga-node-stars">★★★</span>
+            <span class="saga-node-stn-kicker">${stnCode}</span>
             <span class="saga-node-num">${lvl}</span>
+            ${mechBadgeHtml}
           `;
         } else if (isFrontier) {
           btn.innerHTML = `
             <span class="saga-node-bus-pin">🚌 PLAY</span>
+            <span class="saga-node-stn-kicker">${stnCode}</span>
             <span class="saga-node-num">${lvl}</span>
+            ${mechBadgeHtml}
           `;
         } else {
           btn.innerHTML = `
+            <span class="saga-node-stn-kicker">${stnCode}</span>
             <span class="saga-node-num">${lvl}</span>
             <svg class="saga-node-lock-svg" viewBox="0 0 24 24" fill="none">
               <path d="M7 10V7a5 5 0 0 1 10 0v3" stroke="#d97706" stroke-width="2.6" stroke-linecap="round"/>
               <rect x="5" y="10" width="14" height="11" rx="3" fill="#f59e0b" stroke="#b45309" stroke-width="1.5"/>
             </svg>
+            ${mechBadgeHtml}
           `;
         }
       }
@@ -2168,8 +2455,13 @@ export class BusFeverGame {
     if (!scrollEl || !container) return;
     const node = container.querySelector(`.saga-node-btn[data-level="${targetLvl}"]`);
     if (node instanceof HTMLElement) {
-      const top = Math.max(0, node.offsetTop - scrollEl.clientHeight / 2 + 34);
-      scrollEl.scrollTop = top;
+      if (this._sagaIsWide) {
+        const left = Math.max(0, node.offsetLeft - scrollEl.clientWidth / 2 + 34);
+        scrollEl.scrollTo({ left, top: 0, behavior: 'smooth' });
+      } else {
+        const top = Math.max(0, node.offsetTop - scrollEl.clientHeight / 2 + 34);
+        scrollEl.scrollTo({ top, left: 0, behavior: 'smooth' });
+      }
     }
   }
 
@@ -2225,6 +2517,19 @@ export class BusFeverGame {
     document.getElementById('btn-title-music')?.addEventListener('click', (e) =>
       blurAndRun(e, () => this.toggleMusic())
     );
+
+    // 5 City District Quick-Jump Tabs on the Saga Map
+    document.querySelectorAll('.saga-district-tab').forEach((tab) => {
+      tab.addEventListener('click', (e) =>
+        blurAndRun(e, () => {
+          const startLvl = parseInt(tab.getAttribute('data-start-level') || '1', 10);
+          document.querySelectorAll('.saga-district-tab').forEach((t) => {
+            t.classList.toggle('is-active', t === tab);
+          });
+          this._scrollSagaMapToLevel(startLvl);
+        })
+      );
+    });
 
     // Top HUD Bar buttons (including direct Home / Saga Map button)
     document.getElementById('btn-top-home')?.addEventListener('click', (e) =>

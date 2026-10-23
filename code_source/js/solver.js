@@ -1,7 +1,6 @@
 /**
- * Bus Fever 3D: Traffic Escape — Strict Anti-Overlap Grid Math & Reverse-Peel Solvable Stage Generator
- * Guarantees 100% zero overlap across all buses, exact geometric center positioning,
- * raycast line-of-sight blocking detection, and solvable level generation.
+ * Bus Fever 3D: Traffic Escape — Strict Anti-Overlap Grid Math, 4 Detailed Vehicle Specs,
+ * 10 Progressive City Mechanics, & Reverse-Peel Solvable Stage Generator
  */
 
 export const CELL_SIZE = 1.6;
@@ -24,11 +23,158 @@ export const COLORS_PALETTE = [
   'blue',
 ];
 
+/**
+ * 4 Detailed Vehicle Classes with exact capacities requested by user:
+ * 1. taxi       -> capacity: 3,  length: 2
+ * 2. minibus    -> capacity: 15, length: 2
+ * 3. bus        -> capacity: 25, length: 3
+ * 4. double_bus -> capacity: 40, length: 3
+ */
 export const VEHICLE_SPECS = {
-  minivan: { length: 2, defaultCapacity: 4 },
-  bus: { length: 2, defaultCapacity: 6 },
-  coach: { length: 3, defaultCapacity: 8 },
+  taxi: { length: 2, defaultCapacity: 3, label: 'Taxi' },
+  minibus: { length: 2, defaultCapacity: 15, label: 'Mini Bus' },
+  bus: { length: 3, defaultCapacity: 25, label: 'City Bus' },
+  double_bus: { length: 3, defaultCapacity: 40, label: 'Double Bus' },
 };
+
+/**
+ * 10 Progressive Stage Mechanics — 1 new mechanic introduced every 10 levels (Levels 1–100).
+ * Strict constraint: At most 1 mechanic instance is present in any single level.
+ */
+export const STAGE_MECHANICS = [
+  {
+    id: 'mystery_tint',
+    tier: 1,
+    unlockLevel: 1,
+    debutLevel: 2,
+    name: 'Mystery VIP Tint',
+    icon: '❓',
+    badge: '? VIP',
+    desc: 'Color hidden under dark VIP tint until an adjacent vehicle departs',
+  },
+  {
+    id: 'traffic_light',
+    tier: 2,
+    unlockLevel: 11,
+    debutLevel: 11,
+    name: 'Traffic Light Signal',
+    icon: '🚦',
+    badge: 'SIGNAL',
+    desc: 'Toggles Green / Red each dispatch — can only depart on Green',
+  },
+  {
+    id: 'vip_rope',
+    tier: 3,
+    unlockLevel: 21,
+    debutLevel: 21,
+    name: 'VIP Velvet Ropes',
+    icon: '🪢',
+    badge: 'ROPE ×2',
+    desc: 'Velvet ropes untie automatically after 2 other vehicles depart',
+  },
+  {
+    id: 'tunnel_spawner',
+    tier: 4,
+    unlockLevel: 31,
+    debutLevel: 31,
+    name: 'Underground Tunnel',
+    icon: '🚇',
+    badge: 'TUNNEL +1',
+    desc: 'Spawns 1 reserve Taxi from the underground portal after departure',
+  },
+  {
+    id: 'tow_truck',
+    tier: 5,
+    unlockLevel: 41,
+    debutLevel: 41,
+    name: 'City Sweeper Truck',
+    icon: '🚜',
+    badge: 'SWEEPER',
+    desc: '0 passengers — tap when unblocked to drive straight off the road',
+  },
+  {
+    id: 'sleeping_driver',
+    tier: 6,
+    unlockLevel: 51,
+    debutLevel: 51,
+    name: 'Sleeping Driver',
+    icon: '💤',
+    badge: 'ZZZ',
+    desc: 'Dispatch an adjacent vehicle to honk and wake up the driver',
+  },
+  {
+    id: 'direction_flipper',
+    tier: 7,
+    unlockLevel: 61,
+    debutLevel: 61,
+    name: 'U-Turn Flipper Pad',
+    icon: '🔄',
+    badge: '180° PAD',
+    desc: 'Turntable flips vehicle exit direction 180° after each dispatch',
+  },
+  {
+    id: 'express_bonus',
+    tier: 8,
+    unlockLevel: 71,
+    debutLevel: 71,
+    name: 'Express Priority Bus',
+    icon: '⏱️',
+    badge: '+2 PTS',
+    desc: 'Dispatch within 3 moves to earn +2 Bonus Points',
+  },
+  {
+    id: 'dual_color',
+    tier: 9,
+    unlockLevel: 81,
+    debutLevel: 81,
+    name: 'Dual-Color Coach',
+    icon: '🎨',
+    badge: '2-TONE',
+    desc: 'Boards first half with Front Color, then switches to Rear Color',
+  },
+  {
+    id: 'lift_barrier',
+    tier: 10,
+    unlockLevel: 91,
+    debutLevel: 91,
+    name: 'City Lift Barrier',
+    icon: '🚧',
+    badge: 'GATE',
+    desc: 'Automated street gate lifts once the first full bus departs a bay',
+  },
+];
+
+export function getStageMechanicSpec(mechanicId) {
+  if (!mechanicId) return null;
+  return STAGE_MECHANICS.find((m) => m.id === mechanicId) || null;
+}
+
+/**
+ * Returns the single active mechanic spec for a given levelNumber (1..100+).
+ * - Level 1 has no mechanic for clean onboarding.
+ * - Every 10 levels (1-10, 11-20, ..., 91-100) unlocks 1 new mechanic.
+ * - By Level 40, the player has seen 4 mechanics, and each level includes strictly 1 of the unlocked mechanics.
+ */
+export function selectMechanicForLevel(levelNumber) {
+  const lvl = Math.max(1, Math.floor(levelNumber || 1));
+  if (lvl <= 1) return null;
+
+  const maxTierIndex = Math.min(
+    STAGE_MECHANICS.length - 1,
+    Math.floor((lvl - 1) / 10)
+  );
+  const unlockedPool = STAGE_MECHANICS.slice(0, maxTierIndex + 1);
+
+  // Debut levels (Lv 2 for Tier 1, or X1/X2 for Tiers 2..10) always showcase the newest unlocked mechanic
+  const offsetInBand = (lvl - 1) % 10; // 0..9
+  if (lvl === 2 || offsetInBand === 0 || offsetInBand === 1) {
+    return unlockedPool[unlockedPool.length - 1];
+  }
+
+  // Otherwise deterministically rotate across the unlocked pool so every unlocked mechanic appears
+  const pickIndex = (lvl * 7 + maxTierIndex * 3) % unlockedPool.length;
+  return unlockedPool[pickIndex];
+}
 
 /**
  * Computes the exact integer grid cells occupied by a bus.
@@ -37,7 +183,7 @@ export const VEHICLE_SPECS = {
  */
 export function getBusCells(bus) {
   const vec = DIR_VECTORS[bus.dir] || DIR_VECTORS.N;
-  const L = bus.length || (bus.type === 'coach' ? 3 : 2);
+  const L = bus.length || VEHICLE_SPECS[bus.type]?.length || 2;
   const hx = bus.hx !== undefined ? bus.hx : bus.anchorX;
   const hz = bus.hz !== undefined ? bus.hz : bus.anchorZ;
   const cells = [];
@@ -64,8 +210,6 @@ export function getBusMeshDimensions(length) {
 
 /**
  * Computes the geometric center of the bus in grid coordinates and converts to 3D world space.
- * centerX = hx - ((L - 1) * dx) / 2
- * centerZ = hz - ((L - 1) * dz) / 2
  */
 export function getBusWorldCenter(
   bus,
@@ -75,7 +219,7 @@ export function getBusWorldCenter(
   gridOriginX = 0
 ) {
   const vec = DIR_VECTORS[bus.dir] || DIR_VECTORS.N;
-  const L = bus.length || (bus.type === 'coach' ? 3 : 2);
+  const L = bus.length || VEHICLE_SPECS[bus.type]?.length || 2;
   const hx = bus.hx !== undefined ? bus.hx : bus.anchorX;
   const hz = bus.hz !== undefined ? bus.hz : bus.anchorZ;
 
@@ -125,12 +269,254 @@ export function doBusesOverlap(busA, busB) {
 }
 
 /**
+ * Checks whether two buses are orthogonally or diagonally adjacent on the grid.
+ */
+export function areBusesAdjacent(busA, busB) {
+  const cellsA = getBusCells(busA);
+  const cellsB = getBusCells(busB);
+  for (let i = 0; i < cellsA.length; i++) {
+    for (let j = 0; j < cellsB.length; j++) {
+      const dx = Math.abs(cellsA[i].x - cellsB[j].x);
+      const dz = Math.abs(cellsA[i].z - cellsB[j].z);
+      if (dx + dz <= 2 && (dx <= 1 && dz <= 1)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Normalizes legacy vehicle types ('minivan', 'bus', 'coach') or explicit vehicle types
+ * into the 4 detailed classes:
+ * - taxi       (cap: 3,  len: 2)
+ * - minibus    (cap: 15, len: 2)
+ * - bus        (cap: 25, len: 3)
+ * - double_bus (cap: 40, len: 3)
+ */
+function resolveVehicleClass(raw, idx, stageLevel) {
+  if (raw.type === 'taxi' || raw.type === 'minibus' || raw.type === 'double_bus') {
+    const spec = VEHICLE_SPECS[raw.type];
+    return {
+      type: raw.type,
+      preferredLength: spec.length,
+      fallbackLength: raw.length || spec.length,
+      capacity: spec.defaultCapacity,
+    };
+  }
+  if (raw.type === 'bus' && raw.capacity === 25) {
+    return {
+      type: 'bus',
+      preferredLength: 3,
+      fallbackLength: raw.length || 3,
+      capacity: 25,
+    };
+  }
+
+  // Legacy pack normalization so every level showcases the 4 vehicle classes & exact capacities (3, 15, 25, 40)
+  const rawLen = raw.length || (raw.type === 'coach' ? 3 : 2);
+  if (raw.type === 'minivan') {
+    return { type: 'taxi', preferredLength: 2, fallbackLength: 2, capacity: 3 };
+  }
+  if (rawLen === 3 || raw.type === 'coach') {
+    const useDouble = stageLevel >= 3 && (idx + stageLevel) % 2 === 0;
+    return {
+      type: useDouble ? 'double_bus' : 'bus',
+      preferredLength: 3,
+      fallbackLength: 3,
+      capacity: useDouble ? 40 : 25,
+    };
+  }
+
+  // Legacy 2-cell 'bus' -> mix of taxi (3), minibus (15), and bus (25) / double_bus (40)
+  const pattern = (idx + stageLevel) % 6;
+  if (pattern === 0 || pattern === 3) {
+    return { type: 'taxi', preferredLength: 2, fallbackLength: 2, capacity: 3 };
+  }
+  if (pattern === 1 || pattern === 4) {
+    return { type: 'minibus', preferredLength: 2, fallbackLength: 2, capacity: 15 };
+  }
+  if (stageLevel >= 4 && pattern === 5) {
+    return { type: 'double_bus', preferredLength: 3, fallbackLength: 2, capacity: 40 };
+  }
+  return { type: 'bus', preferredLength: 3, fallbackLength: 2, capacity: 25 };
+}
+
+/**
+ * Attaches strictly 1 progressive mechanic to 1 suitable vehicle on the stage (for Level >= 2).
+ */
+export function assignStageMechanic(buses, stageLevel, gridWidth, gridHeight) {
+  // Clear any pre-existing mechanic flags first so max 1 mechanic per level is strictly enforced
+  for (let i = 0; i < buses.length; i++) {
+    delete buses[i].mechanic;
+    delete buses[i].mechanicState;
+    delete buses[i].secondaryColor;
+    delete buses[i].tunnelReserve;
+  }
+
+  const spec = selectMechanicForLevel(stageLevel);
+  if (!spec || buses.length < 2) return null;
+
+  // Identify which buses are initially unblocked vs blocked so we pick an ideal carrier bus
+  const unblocked = [];
+  const blocked = [];
+  for (let i = 0; i < buses.length; i++) {
+    const blocker = findBlockingBus(buses[i], buses, gridWidth, gridHeight);
+    if (!blocker) {
+      unblocked.push(buses[i]);
+    } else {
+      blocked.push(buses[i]);
+    }
+  }
+
+  let targetBus = null;
+
+  switch (spec.id) {
+    case 'mystery_tint':
+    case 'sleeping_driver': {
+      // Pick a bus that has at least one unblocked neighbor so dispatching the neighbor reveals/wakes it
+      targetBus =
+        blocked.find((b) => unblocked.some((u) => areBusesAdjacent(b, u))) ||
+        (unblocked.length > 1 ? unblocked[unblocked.length - 1] : buses[buses.length - 1]);
+      targetBus.mechanic = spec.id;
+      targetBus.mechanicState = {
+        revealed: false,
+        awake: false,
+      };
+      break;
+    }
+
+    case 'vip_rope': {
+      // Pick a blocked or secondary bus; unties after 2 dispatches
+      targetBus = blocked[0] || unblocked[unblocked.length - 1] || buses[0];
+      targetBus.mechanic = 'vip_rope';
+      targetBus.mechanicState = {
+        ropesRemaining: 2,
+      };
+      break;
+    }
+
+    case 'traffic_light': {
+      // Starts Green (true) so if tapped immediately it works, and toggles every dispatch
+      targetBus = unblocked[Math.min(1, unblocked.length - 1)] || buses[0];
+      targetBus.mechanic = 'traffic_light';
+      targetBus.mechanicState = {
+        green: true,
+      };
+      break;
+    }
+
+    case 'tunnel_spawner': {
+      // Attach underground tunnel arch behind a 2-cell vehicle; spawns 1 reserve taxi (cap 3) on departure
+      targetBus =
+        buses.find((b) => b.length === 2) ||
+        unblocked[0] ||
+        buses[0];
+      const usedColors = Array.from(new Set(buses.map((b) => b.color)));
+      const reserveColor = usedColors[(stageLevel + 1) % usedColors.length] || targetBus.color;
+      targetBus.mechanic = 'tunnel_spawner';
+      targetBus.tunnelReserve = {
+        type: 'taxi',
+        length: 2,
+        capacity: 3,
+        color: reserveColor,
+      };
+      targetBus.mechanicState = {
+        spawned: false,
+      };
+      break;
+    }
+
+    case 'tow_truck': {
+      // Convert 1 unblocked or lightly blocked 2-cell vehicle into a 0-passenger yellow City Sweeper Truck
+      targetBus =
+        unblocked.find((b) => b.length === 2) ||
+        buses.find((b) => b.length === 2) ||
+        unblocked[0] ||
+        buses[0];
+      targetBus.mechanic = 'tow_truck';
+      targetBus.type = 'taxi';
+      targetBus.length = 2;
+      targetBus.capacity = 0;
+      targetBus.color = 'yellow';
+      targetBus.mechanicState = {
+        isServiceTruck: true,
+      };
+      break;
+    }
+
+    case 'direction_flipper': {
+      targetBus = blocked[0] || unblocked[unblocked.length - 1] || buses[0];
+      targetBus.mechanic = 'direction_flipper';
+      targetBus.mechanicState = {
+        flippedCount: 0,
+      };
+      break;
+    }
+
+    case 'express_bonus': {
+      // Attach to an accessible bus so the player can dispatch it within 3 moves for +2 Bonus Points
+      targetBus = unblocked[unblocked.length - 1] || buses[0];
+      targetBus.mechanic = 'express_bonus';
+      targetBus.mechanicState = {
+        movesRemaining: 3,
+        bonusPoints: 2,
+      };
+      break;
+    }
+
+    case 'dual_color': {
+      // Pick a minibus/bus/double_bus and give it a secondary rear color
+      targetBus =
+        buses.find((b) => b.capacity >= 15) ||
+        buses[0];
+      const availableColors = Array.from(
+        new Set(buses.map((b) => b.color).filter((c) => c !== targetBus.color))
+      );
+      const secondColor =
+        availableColors[0] ||
+        COLORS_PALETTE.find((c) => c !== targetBus.color) ||
+        'cyan';
+      const firstHalf = Math.ceil(targetBus.capacity / 2);
+      targetBus.mechanic = 'dual_color';
+      targetBus.secondaryColor = secondColor;
+      targetBus.mechanicState = {
+        primaryColor: targetBus.color,
+        secondaryColor: secondColor,
+        switchAtSeated: firstHalf,
+        switched: false,
+      };
+      break;
+    }
+
+    case 'lift_barrier': {
+      // Attach a street lift barrier to a secondary/blocked bus; lifts once the first full bus departs a bay
+      targetBus =
+        (unblocked.length > 1 ? unblocked[unblocked.length - 1] : null) ||
+        blocked[0] ||
+        buses[buses.length - 1];
+      targetBus.mechanic = 'lift_barrier';
+      targetBus.mechanicState = {
+        gateOpen: false,
+      };
+      break;
+    }
+
+    default:
+      break;
+  }
+
+  return targetBus ? { ...spec, busId: targetBus.id } : null;
+}
+
+/**
  * Mandatory Pre-Render Overlap & Solvability Sanitizer.
- * Verifies every bus is in bounds and occupies unique integer cells via a Set occupancy check.
- * If a conflict is detected in custom/external JSON, relocates the bus to a free slot or removes it,
- * and recalculates the passengerQueue so total passenger colors match total bus seats 100%.
+ * Verifies every bus is in bounds and occupies unique integer cells via a Set occupancy check,
+ * upgrades vehicles to the 4 detailed classes (taxi=3, minibus=15, bus=25, double_bus=40),
+ * attaches the level's single progressive mechanic, and builds the exact matching passengerQueue.
  */
 export function sanitizeStage(rawStage) {
+  const stageLevel = Math.max(1, Math.floor(rawStage.level || 1));
   const gridWidth = rawStage.grid?.width || 7;
   const gridHeight = rawStage.grid?.height || 7;
   const occupied = new Set();
@@ -140,40 +526,64 @@ export function sanitizeStage(rawStage) {
 
   for (let idx = 0; idx < inputBuses.length; idx++) {
     const raw = inputBuses[idx];
-    const length = raw.length || VEHICLE_SPECS[raw.type]?.length || 2;
-    const capacity = raw.capacity || VEHICLE_SPECS[raw.type]?.defaultCapacity || (length === 3 ? 6 : 4);
-    const candidate = {
-      id: raw.id || `bus_${idx + 1}`,
-      type: raw.type || (length === 3 ? 'coach' : 'bus'),
-      color: raw.color || COLORS_PALETTE[idx % COLORS_PALETTE.length],
-      dir: DIR_VECTORS[raw.dir] ? raw.dir : 'N',
-      length,
-      capacity,
-      hx: raw.hx !== undefined ? raw.hx : raw.anchorX,
-      hz: raw.hz !== undefined ? raw.hz : raw.anchorZ,
-    };
+    const resolved = resolveVehicleClass(raw, idx, stageLevel);
+    const dir = DIR_VECTORS[raw.dir] ? raw.dir : 'N';
+    const hx = raw.hx !== undefined ? raw.hx : raw.anchorX;
+    const hz = raw.hz !== undefined ? raw.hz : raw.anchorZ;
 
-    const cells = getBusCells(candidate);
-    let valid = isBusInBounds(candidate, gridWidth, gridHeight);
-    if (valid) {
-      for (let i = 0; i < cells.length; i++) {
-        const key = `${cells[i].x},${cells[i].z}`;
-        if (occupied.has(key)) {
-          valid = false;
-          break;
+    // Try preferredLength first (e.g. 3 for bus/double_bus), falling back to fallbackLength if tight in legacy pack
+    let chosenCandidate = null;
+    const tryLengths =
+      resolved.preferredLength !== resolved.fallbackLength
+        ? [resolved.preferredLength, resolved.fallbackLength]
+        : [resolved.preferredLength];
+
+    for (let lIdx = 0; lIdx < tryLengths.length; lIdx++) {
+      const testLen = tryLengths[lIdx];
+      const testCandidate = {
+        id: raw.id || `bus_${idx + 1}`,
+        type: resolved.type,
+        color: raw.color || COLORS_PALETTE[idx % COLORS_PALETTE.length],
+        dir,
+        length: testLen,
+        capacity: resolved.capacity,
+        hx,
+        hz,
+      };
+      const cells = getBusCells(testCandidate);
+      let valid = isBusInBounds(testCandidate, gridWidth, gridHeight);
+      if (valid) {
+        for (let i = 0; i < cells.length; i++) {
+          if (occupied.has(`${cells[i].x},${cells[i].z}`)) {
+            valid = false;
+            break;
+          }
         }
+      }
+      if (valid) {
+        chosenCandidate = testCandidate;
+        break;
       }
     }
 
-    if (!valid) {
+    if (!chosenCandidate) {
       // Attempt to relocate candidate to a non-overlapping valid position on the grid
-      let relocated = null;
-      const dirs = [candidate.dir, 'N', 'E', 'W', 'S'];
+      const fallbackCandidate = {
+        id: raw.id || `bus_${idx + 1}`,
+        type: resolved.type,
+        color: raw.color || COLORS_PALETTE[idx % COLORS_PALETTE.length],
+        dir,
+        length: resolved.fallbackLength,
+        capacity: resolved.capacity,
+        hx,
+        hz,
+      };
+      const dirs = [dir, 'N', 'E', 'W', 'S'];
       outer: for (let d = 0; d < dirs.length; d++) {
         const tryDir = dirs[d];
         for (let z = 0; z < gridHeight; z++) {
           for (let x = 0; x < gridWidth; x++) {
-            const testBus = { ...candidate, dir: tryDir, hx: x, hz: z };
+            const testBus = { ...fallbackCandidate, dir: tryDir, hx: x, hz: z };
             if (!isBusInBounds(testBus, gridWidth, gridHeight)) continue;
             const testCells = getBusCells(testBus);
             let free = true;
@@ -184,36 +594,38 @@ export function sanitizeStage(rawStage) {
               }
             }
             if (free) {
-              relocated = testBus;
+              chosenCandidate = testBus;
               break outer;
             }
           }
         }
       }
-      if (relocated) {
-        const relCells = getBusCells(relocated);
-        for (let c = 0; c < relCells.length; c++) {
-          occupied.add(`${relCells[c].x},${relCells[c].z}`);
-        }
-        sanitizedBuses.push(relocated);
-      }
-    } else {
+    }
+
+    if (chosenCandidate) {
+      const cells = getBusCells(chosenCandidate);
       for (let c = 0; c < cells.length; c++) {
         occupied.add(`${cells[c].x},${cells[c].z}`);
       }
-      sanitizedBuses.push(candidate);
+      sanitizedBuses.push(chosenCandidate);
     }
   }
 
   // Ensure every stage can be peeled (no permanent mutual cycles)
   fixMutualCycles(sanitizedBuses, gridWidth, gridHeight);
 
-  // Reconcile passengerQueue so exact seat counts per color match 100%
-  // and chunking scales progressively with stage level
-  const stageLevel = rawStage.level || 1;
+  // Attach strictly 1 progressive mechanic for this level (1 new mechanic every 10 levels)
+  const activeMechanic = assignStageMechanic(
+    sanitizedBuses,
+    stageLevel,
+    gridWidth,
+    gridHeight
+  );
+
+  // Reconcile passengerQueue so exact seat counts per color match 100% (including dual_color & tunnel_spawner)
   const passengerQueue = buildBalancedPassengerQueue(
     sanitizedBuses,
-    rawStage.passengerQueue,
+    null,
     gridWidth,
     gridHeight,
     stageLevel
@@ -221,10 +633,11 @@ export function sanitizeStage(rawStage) {
 
   return {
     level: stageLevel,
-    title: rawStage.title || `Level ${stageLevel}`,
-    difficulty: rawStage.difficulty || 'medium',
+    title: rawStage.title || `Station ${stageLevel}`,
+    difficulty: rawStage.difficulty || 'Normal',
     grid: { width: gridWidth, height: gridHeight },
     dockSlots: rawStage.dockSlots || 4,
+    activeMechanic,
     buses: sanitizedBuses,
     passengerQueue,
   };
@@ -305,7 +718,6 @@ export function fixMutualCycles(buses, gridWidth, gridHeight) {
         orig.hz = stuck.hz;
       }
 
-      // If still blocked in both directions, point it toward nearest edge if 1-cell flip isn't possible
       if (findBlockingBus(stuck, remaining, gridWidth, gridHeight)) {
         stuck.dir = 'N';
         if (orig) orig.dir = 'N';
@@ -316,50 +728,53 @@ export function fixMutualCycles(buses, gridWidth, gridHeight) {
 }
 
 /**
+ * Expands a peeled vehicle list into passenger color segments, accounting for:
+ * - tow_truck: 0 passengers
+ * - dual_color: firstHalf of primary color + secondHalf of secondaryColor
+ * - tunnel_spawner: adds the spawned reserve taxi's passengers right after the carrier vehicle
+ */
+function expandBusPassengerSegments(peeledBuses) {
+  const segments = [];
+  for (let i = 0; i < peeledBuses.length; i++) {
+    const bus = peeledBuses[i];
+    if (bus.mechanic === 'tow_truck' || bus.capacity <= 0) {
+      continue;
+    }
+    if (bus.mechanic === 'dual_color' && bus.secondaryColor) {
+      const firstHalf = Math.ceil(bus.capacity / 2);
+      const secondHalf = Math.max(0, bus.capacity - firstHalf);
+      if (firstHalf > 0) {
+        segments.push({ color: bus.color, remaining: firstHalf });
+      }
+      if (secondHalf > 0) {
+        segments.push({ color: bus.secondaryColor, remaining: secondHalf });
+      }
+    } else {
+      segments.push({ color: bus.color, remaining: bus.capacity });
+    }
+
+    if (bus.mechanic === 'tunnel_spawner' && bus.tunnelReserve) {
+      segments.push({
+        color: bus.tunnelReserve.color || bus.color,
+        remaining: bus.tunnelReserve.capacity || 3,
+      });
+    }
+  }
+  return segments;
+}
+
+/**
  * Simulates peeling the buses and builds a passengerQueue in solvable wave order
- * with progressive color chunking based on levelNumber:
- * - Levels 1–4: Clean, contiguous single-color chunks (e.g. chunk of pink -> chunk of red -> chunk of green)
- *   Also prefers peeling same-color unblocked buses consecutively so early levels have super-clean color blocks.
- * - Levels 5–9: Medium color chunks (chunkSize = 3..4) interleaved between pairs of solvable buses.
- * - Levels 10+: Finer color chunks (chunkSize = 2, then 1) interleaved within 2–3 bus waves for higher challenge.
+ * with progressive color chunking based on levelNumber.
  */
 export function buildBalancedPassengerQueue(
   buses,
-  existingQueue,
+  _existingQueue,
   gridWidth,
   gridHeight,
   levelNumber = 1
 ) {
-  // Calculate exact required seats per color
-  const requiredByColor = {};
-  let totalRequired = 0;
-  for (let i = 0; i < buses.length; i++) {
-    const b = buses[i];
-    requiredByColor[b.color] = (requiredByColor[b.color] || 0) + b.capacity;
-    totalRequired += b.capacity;
-  }
-
-  // Check if existingQueue already matches exact color totals
-  if (Array.isArray(existingQueue) && existingQueue.length === totalRequired) {
-    const counts = {};
-    for (let i = 0; i < existingQueue.length; i++) {
-      const col = existingQueue[i];
-      counts[col] = (counts[col] || 0) + 1;
-    }
-    let exactMatch = true;
-    for (const col of Object.keys(requiredByColor)) {
-      if (counts[col] !== requiredByColor[col]) {
-        exactMatch = false;
-        break;
-      }
-    }
-    if (exactMatch) {
-      return existingQueue.slice();
-    }
-  }
-
   // Simulate peeling buses in solvable order.
-  // For low levels (<= 5), if an unblocked bus matches the last peeled color, pick it next to form larger contiguous color blocks!
   const remaining = buses.map((b) => ({ ...b }));
   const peeledBuses = [];
   let lastColor = null;
@@ -374,7 +789,9 @@ export function buildBalancedPassengerQueue(
 
     let pickIdx = unblockedIndices.length > 0 ? unblockedIndices[0] : 0;
     if (levelNumber <= 5 && lastColor && unblockedIndices.length > 1) {
-      const sameColorIdx = unblockedIndices.find((idx) => remaining[idx].color === lastColor);
+      const sameColorIdx = unblockedIndices.find(
+        (idx) => remaining[idx].color === lastColor && !remaining[idx].mechanic
+      );
       if (sameColorIdx !== undefined) {
         pickIdx = sameColorIdx;
       }
@@ -385,30 +802,31 @@ export function buildBalancedPassengerQueue(
     peeledBuses.push(picked);
   }
 
+  const segments = expandBusPassengerSegments(peeledBuses);
   const lvl = Math.max(1, Math.floor(levelNumber || 1));
 
-  // Levels 1 to 4: 100% pure contiguous chunks per bus (zero interleaving)
+  // Levels 1 to 4: 100% pure contiguous chunks per bus segment (zero interleaving)
   if (lvl <= 4) {
     const pureQueue = [];
-    for (let i = 0; i < peeledBuses.length; i++) {
-      const bus = peeledBuses[i];
-      for (let c = 0; c < bus.capacity; c++) {
-        pureQueue.push(bus.color);
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      for (let c = 0; c < seg.remaining; c++) {
+        pureQueue.push(seg.color);
       }
     }
     return pureQueue;
   }
 
-  // Levels 5+: Progressive chunked interleaving within small solvable waves (2 buses for Lv 5..11, 3 buses for Lv 12+)
-  // Since the player has 4+ parking bays, interleaving 2–3 solvable buses in chunks is always 100% solvable.
-  const waveBusCount = lvl <= 11 ? 2 : 3;
-  const chunkSize = lvl <= 7 ? 4 : lvl <= 11 ? 3 : lvl <= 16 ? 2 : 1;
+  // Levels 5+: Progressive chunked interleaving within small solvable waves (2..3 segments)
+  // Because buses now hold 3, 15, 25, or 40 passengers, scale chunk sizes cleanly
+  const waveSegCount = lvl <= 12 ? 2 : 3;
+  const chunkSize = lvl <= 8 ? 8 : lvl <= 18 ? 6 : lvl <= 35 ? 5 : lvl <= 60 ? 4 : 3;
 
   const queue = [];
-  for (let w = 0; w < peeledBuses.length; w += waveBusCount) {
-    const wave = peeledBuses.slice(w, w + waveBusCount).map((b) => ({
-      color: b.color,
-      remaining: b.capacity,
+  for (let w = 0; w < segments.length; w += waveSegCount) {
+    const wave = segments.slice(w, w + waveSegCount).map((s) => ({
+      color: s.color,
+      remaining: s.remaining,
     }));
 
     let anyLeft = true;
@@ -431,7 +849,7 @@ export function buildBalancedPassengerQueue(
 }
 
 /**
- * Deterministic PRNG (Mulberry32) for reproducible procedural stages.
+ * Deterministic PRNG (Mulberry32) for reproducible procedural stages across 100+ stations.
  */
 function createRng(seed) {
   let t = seed >>> 0;
@@ -445,25 +863,23 @@ function createRng(seed) {
 
 /**
  * Reverse-Peel Solvable Stage Generator.
- * Creates infinite zero-overlap, 100% solvable levels for any levelNumber.
- * Places buses iteratively so each added bus has a clear exit path at the moment it is peeled.
+ * Creates zero-overlap, 100% solvable levels across all 100 City Stations and beyond.
  */
 export function generateSolvableStage(levelNumber, customSeed) {
   const rng = createRng(customSeed !== undefined ? customSeed : levelNumber * 9973 + 1337);
 
-  // Scale grid and bus count with level progression (every 5 levels is a milestone)
-  const milestoneTier = Math.floor((levelNumber - 1) / 5);
-  const gridWidth = Math.min(9, 6 + Math.min(3, Math.floor(levelNumber / 4)));
-  const gridHeight = Math.min(9, 6 + Math.min(3, Math.floor(levelNumber / 3)));
+  const milestoneTier = Math.floor((levelNumber - 1) / 10);
+  const gridWidth = Math.min(9, 6 + Math.min(3, Math.floor(levelNumber / 8)));
+  const gridHeight = Math.min(9, 6 + Math.min(3, Math.floor(levelNumber / 6)));
 
   const targetBusCount = Math.min(
-    18,
-    6 + Math.floor(levelNumber * 0.85) + (levelNumber % 5 === 0 ? 2 : 0)
+    16,
+    6 + Math.floor(levelNumber * 0.14) + (levelNumber % 5 === 0 ? 2 : 0)
   );
 
   const numColors = Math.min(
     COLORS_PALETTE.length,
-    3 + Math.floor(levelNumber / 3)
+    3 + Math.floor(levelNumber / 6)
   );
   const activeColors = COLORS_PALETTE.slice(0, numColors);
 
@@ -472,14 +888,23 @@ export function generateSolvableStage(levelNumber, customSeed) {
   const dirs = ['N', 'S', 'E', 'W'];
 
   for (let bIdx = 0; bIdx < targetBusCount * 4 && placedBuses.length < targetBusCount; bIdx++) {
-    const isCoach = rng() < Math.min(0.45, 0.12 + levelNumber * 0.02);
-    const isMinivan = !isCoach && rng() < 0.35;
-    const type = isCoach ? 'coach' : isMinivan ? 'minivan' : 'bus';
-    const length = isCoach ? 3 : 2;
-    const capacity = isCoach ? 8 : isMinivan ? 4 : 6;
+    const roll = rng();
+    let type = 'minibus';
+    if (roll < 0.30) {
+      type = 'taxi';
+    } else if (roll < 0.62) {
+      type = 'minibus';
+    } else if (roll < 0.85) {
+      type = 'bus';
+    } else {
+      type = 'double_bus';
+    }
+
+    const spec = VEHICLE_SPECS[type];
+    const length = spec.length;
+    const capacity = spec.defaultCapacity;
     const color = activeColors[placedBuses.length % activeColors.length];
 
-    // Shuffle candidate grid cells and directions
     const dirOrder = dirs.slice().sort(() => rng() - 0.5);
     if (rng() < 0.45) {
       dirOrder.unshift('N');
@@ -531,15 +956,17 @@ export function generateSolvableStage(levelNumber, customSeed) {
     }
   }
 
-  const difficultyNames = ['Easy', 'Normal', 'Medium', 'Hard', 'Expert'];
+  const difficultyNames = ['Easy', 'Normal', 'Medium', 'Hard', 'Expert', 'Master'];
   const difficulty =
-    levelNumber % 5 === 0
-      ? 'Boss Milestone'
-      : difficultyNames[Math.min(difficultyNames.length - 1, milestoneTier)];
+    levelNumber % 10 === 0
+      ? 'District Boss'
+      : levelNumber % 5 === 0
+        ? 'Boss Station'
+        : difficultyNames[Math.min(difficultyNames.length - 1, milestoneTier)];
 
   return sanitizeStage({
     level: levelNumber,
-    title: `Level ${levelNumber}`,
+    title: `Station ${levelNumber}`,
     difficulty,
     grid: { width: gridWidth, height: gridHeight },
     dockSlots: 4,
